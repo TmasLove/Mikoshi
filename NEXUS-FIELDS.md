@@ -6,7 +6,7 @@ Paste each block into the matching field.
 
 ## Description
 
-Daemon is a quest-repair and item menu for Cyberpunk 2077, built on Cyber Engine Tweaks.
+Mikoshi is a quest-repair and item menu for Cyberpunk 2077, built on Cyber Engine Tweaks.
 
 It started with Letter of the Law: the quest would not register that I had gathered the information needed to proceed. Four ids from popular community lists turned out to be wrong, including one that reads perfectly in game but belongs to a different quest entirely.
 
@@ -25,9 +25,9 @@ From that one quest it grew into the commands people actually ask for: eddies an
 1. Install Cyber Engine Tweaks first if you do not have it.
 2. Unzip this mod into your Cyberpunk 2077 folder. It lands at `bin\x64\plugins\cyber_engine_tweaks\mods\fixer\`.
 3. Open the CET overlay and press **Reload All Mods**, or restart the game.
-4. The Daemon window appears whenever the overlay is open.
+4. The Mikoshi window appears whenever the overlay is open.
 
-To bind a key: open the overlay, go to **Bindings**, find "Fixer: show menu", click the empty box, press your key, then Save. CET does not allow mods to ship a default key, so it starts unbound.
+To bind a key: open the overlay, go to **Bindings**, find "Mikoshi: show menu", click the empty box, press your key, then Save. CET does not allow mods to ship a default key, so it starts unbound.
 
 **To uninstall:** delete the `fixer` folder. It writes nothing outside its own directory apart from a one-line `theme.txt` beside itself holding your chosen colour palette.
 

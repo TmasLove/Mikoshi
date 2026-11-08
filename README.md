@@ -1,12 +1,12 @@
-<img src="docs/banner.png" alt="Daemon, a Night City toolkit for Cyberpunk 2077">
+<img src="docs/banner.png" alt="Mikoshi, a Night City toolkit for Cyberpunk 2077">
 
-# Daemon
+# Mikoshi
 
 A Cyber Engine Tweaks mod menu for Cyberpunk 2077, built for game **2.5** and
 **CET 1.38.1**. It repairs stuck quests, hands over items, and browses every
 record the running game will admit to.
 
-Folder name is `fixer` and the display name is Daemon. The folder stays as it is
+Folder name is `fixer` and the display name is Mikoshi. The folder stays as it is
 so an existing hotkey binding survives a rename.
 
 ![Quest Fixes and the cyberpsycho checklist](docs/screenshot-quest-fixes.png)
@@ -23,7 +23,7 @@ Open the CET overlay, press **Reload All Mods**. No restart. To remove it,
 delete the folder; it writes nothing outside its own directory except a one-line
 `theme.txt` beside itself.
 
-To bind a key: overlay, **Bindings**, "Fixer: show menu". CET does not let a mod
+To bind a key: overlay, **Bindings**, "Mikoshi: show menu". CET does not let a mod
 ship a default key, so it starts unbound.
 
 ## The rule this is built on

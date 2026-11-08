@@ -217,7 +217,7 @@ local function note(fmt, ...)
     local msg = select('#', ...) > 0 and string.format(fmt, ...) or fmt
     table.insert(state.log, 1, now() .. '  ' .. msg)
     while #state.log > 60 do table.remove(state.log) end
-    print('[Daemon] ' .. msg)
+    print('[Mikoshi] ' .. msg)
 end
 
 local function recordExists(id)
@@ -626,7 +626,7 @@ local function drawnBanner()
         local dl   = ImGui.GetWindowDrawList()
         local h, cut = 44, 22
         local YEL, CYN, DIM = pack(A()), pack(B()), pack(B(), 0.20)
-        local barW = math.max(180, w * 0.58)
+        local barW = math.max(210, w * 0.62)
 
         -- solid block with a slant off its right edge
         dl:AddRectFilled(x, y, x + barW, y + h, YEL)
@@ -644,7 +644,7 @@ local function drawnBanner()
         dl:AddRectFilled(x, y + h + 3, x + 46, y + h + 5, YEL)
 
         -- title sits on the yellow, so it is drawn dark
-        dl:AddText(x + 16, y + 13, DRK, 'D A E M O N')
+        dl:AddText(x + 16, y + 13, DRK, 'M I K O S H I')
         dl:AddText(x + barW + cut + 14, y + 13, CYN, 'NIGHT CITY TOOLKIT')
 
         ImGui.Dummy(w, h + 10)
@@ -657,7 +657,7 @@ local function banner()
     if not drawnBanner() then
         -- Fallback: one font at one size, so scale it for the title line only.
         local scaled = caps.SetWindowFontScale and pcall(function() ImGui.SetWindowFontScale(1.45) end)
-        bar('D A E M O N', A()[1], A()[2], A()[3], scaled and 38 or 30)
+        bar('M I K O S H I', A()[1], A()[2], A()[3], scaled and 38 or 30)
         if scaled then pcall(function() ImGui.SetWindowFontScale(1.0) end) end
         textc(COL.accent, ic('ChevronRight') .. 'NIGHT CITY TOOLKIT')
     end
@@ -993,7 +993,7 @@ local function tabWorld()
         if ImGui.Button('Dump the weather system to the log##dumpws') then
             local ok, out = pcall(function() return Dump(Game.GetWeatherSystem(), false) end)
             if ok then
-                print('[Daemon] weather system dump follows'); print(tostring(out))
+                print('[Mikoshi] weather system dump follows'); print(tostring(out))
                 note('OK  dumped the weather system. Check the console for the real method names.')
             else
                 note('FAIL Dump refused: ' .. tostring(out))
@@ -1462,7 +1462,7 @@ local function tabDiagnostics()
     if ImGui.Button('Dump vehicle system to the log##dumpvs') then
         local ok, out = pcall(function() return Dump(Game.GetVehicleSystem(), false) end)
         if ok then
-            print('[Daemon] vehicle system dump follows')
+            print('[Mikoshi] vehicle system dump follows')
             print(tostring(out))
             note('OK  dumped the vehicle system to the console and cyber_engine_tweaks.log')
         else
@@ -1474,7 +1474,7 @@ local function tabDiagnostics()
     sep()
 
     section('keybind')
-    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Fixer: show menu", click the empty box, press the key you want, then Save.')
+    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: show menu", click the empty box, press the key you want, then Save.')
     textc(state.pinned and COL.ok or COL.dim,
         state.pinned and 'pinned: the menu stays on screen with the overlay shut'
                        or 'not pinned: the menu shows only while the overlay is open')
@@ -1593,7 +1593,7 @@ registerForEvent('onInit', function()
     resolveApi()
     verifyAll()
     mod.ready = true
-    note('Daemon ready. %s, %s.', api.setFactSrc or 'no fact API',
+    note('Mikoshi ready. %s, %s.', api.setFactSrc or 'no fact API',
         api.journalOk and 'journal OK' or 'journal incomplete')
 end)
 
@@ -1607,7 +1607,7 @@ registerForEvent('onDraw', function()
 
     pushTheme()
     ImGui.SetNextWindowSize(640, 660, ImGuiCond.FirstUseEver)
-    if ImGui.Begin('DAEMON') then
+    if ImGui.Begin('MIKOSHI') then
 
         banner()
         if not state.overlayOpen then
@@ -1659,15 +1659,16 @@ end)
 
 -- Root level, outside any event: CET requires it there. CET does not let a mod
 -- ship a default key, so this appears UNBOUND in the overlay's Bindings tab
--- until you assign one. Bindings > "Fixer: show menu" > click > press a key >
+-- until you assign one. Bindings > "Mikoshi: show menu" > click > press a key >
 -- Save.
 --
 -- Pinning draws the window with the overlay shut, which is the point of having
 -- a key at all. Clicking still needs the overlay, because CET only routes mouse
 -- and keyboard into ImGui while it is open. That is a CET rule, not a choice.
-registerHotkey('fixer_toggle', 'Fixer: show menu', function()
+registerHotkey('fixer_toggle', 'Mikoshi: show menu', function()
     state.pinned = not state.pinned
     if state.pinned then state.show = true end
 end)
 
 return mod
+
