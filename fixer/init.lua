@@ -1903,41 +1903,93 @@ end
 local SEARCH_TYPES = {
     'gamedataConsumableItem_Record',
     'gamedataGenericItem_Record',
+    'gamedataItem_Record',
     'gamedataAmmo_Record',
     'gamedataClothing_Record',
     'gamedataWeaponItem_Record',
-    'gamedataItem_Record',
+    'gamedataCyberwareItem_Record',
+    'gamedataGrenade_Record',
+    'gamedataRecipeItem_Record',
+    'gamedataItemBlueprint_Record',
+    'gamedataAttachmentItem_Record',
+    'gamedataEquipmentItem_Record',
 }
 
-local function findLike(id)
-    -- The tail is what identifies the thing: Items.CPO_MaxDoc is looked up as
-    -- "MaxDoc", because the prefix is exactly the part a rename changes.
+-- Several needles, longest first, because one needle is a guess about HOW the
+-- thing was renamed. Items.FirstAidWhiteOne searched as "firstaidwhiteone"
+-- finds nothing the moment the tail changed; searched as "firstaid" it finds
+-- the whole family. Underscore ids lose their trailing number, camel-case ids
+-- lose their trailing words.
+local function needlesFor(id)
     local tail = tostring(id):match('([^%.]+)$') or tostring(id)
-    tail = tail:gsub('^CPO_', ''):gsub('%d+$', '')
-    local needle = tail:lower()
-    if #needle < 3 then return {}, 'that id has nothing distinctive to search for' end
+    tail = tail:gsub('^CPO_', '')
+    local out, seen = {}, {}
+    local function add(s)
+        if s and #s >= 4 then
+            s = s:lower()
+            if not seen[s] then seen[s] = true; out[#out + 1] = s end
+        end
+    end
+    add(tail)
+    add((tail:gsub('%d+$', '')))
+    add((tail:gsub('_[^_]*$', '')))
+    -- camel-case tokens: FirstAidWhiteOne -> First, Aid, White, One
+    local tok = {}
+    for w in tail:gmatch('%u%l+') do tok[#tok + 1] = w end
+    if #tok >= 2 then add(tok[1] .. tok[2]) end
+    if #tok >= 1 then add(tok[1]) end
+    if #tok >= 1 then add(tok[#tok]) end
+    return out, tail
+end
 
-    local hits, seen, swept = {}, {}, 0
+local function findLike(id)
+    local needles, tail = needlesFor(id)
+    if #needles == 0 then return {}, 'that id has nothing distinctive to search for' end
+
+    -- Sweep once, keep every record name, then match. Re-reading tens of
+    -- thousands of records per needle would be absurd.
+    local pool, swept, total, answered = {}, 0, 0, {}
     for _, t in ipairs(SEARCH_TYPES) do
         local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
         if ok and recs ~= nil then
-            swept = swept + 1
+            local n0 = total
             pcall(function()
                 for _, r in ipairs(recs) do
                     local n = recordName(r)
-                    if n and not seen[n] and tostring(n):lower():find(needle, 1, true) then
-                        seen[n] = true
-                        hits[#hits + 1] = n
-                        if #hits >= 24 then return end
-                    end
+                    if n then total = total + 1; pool[#pool + 1] = tostring(n) end
                 end
             end)
+            if total > n0 then
+                swept = swept + 1
+                answered[#answered + 1] = string.format('%s %d', t:gsub('^gamedata', ''):gsub('_Record$', ''), total - n0)
+            end
         end
-        if #hits >= 24 then break end
     end
-    table.sort(hits)
-    if swept == 0 then return hits, 'TweakDB:GetRecords answered for none of the item types' end
-    return hits, string.format('searched %d record type(s) for "%s"', swept, tail)
+
+    -- "Searched and found nothing" and "could not search" are different
+    -- answers and this used to report both as the first one. That is the same
+    -- mistake as calling a nil return a success.
+    if total == 0 then
+        return {}, 'NOT SEARCHED: none of the ' .. #SEARCH_TYPES
+            .. ' item record types returned anything, so this proves nothing about ' .. tail
+    end
+
+    for _, needle in ipairs(needles) do
+        local hits, seen = {}, {}
+        for _, n in ipairs(pool) do
+            if not seen[n] and n:lower():find(needle, 1, true) then
+                seen[n] = true; hits[#hits + 1] = n
+                if #hits >= 24 then break end
+            end
+        end
+        if #hits > 0 then
+            table.sort(hits)
+            return hits, string.format('matched "%s" in %d record(s) across %s',
+                needle, total, table.concat(answered, ', '))
+        end
+    end
+    return {}, string.format('no record out of %d contains any of: %s   [%s]',
+        total, table.concat(needles, ', '), table.concat(answered, ', '))
 end
 
 local function tabBrowse()

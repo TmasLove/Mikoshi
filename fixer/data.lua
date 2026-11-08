@@ -185,8 +185,12 @@ return {
   shards = {
     { label = 'Lt. Mower',                      record = 'Items.ma_wat_kab_08_onscreen_01' },
     { label = 'Demons of War (Matt Liaw)',      record = 'Items.ma_wat_kab_02_onscreen_01' },
-    { label = 'Six Feet Under (Lely Hein)',     record = 'Items.ma_wat_nid_22_onscreen_01',
-      note = 'District corrected: the quest is wat_nid_22, not wbr_hil_01. Suffix still unverified.' },
+    -- 2026-11-08, read off the live TweakDB rather than off a list: _01 is
+    -- not on 2.5 and _02 is the ONLY ma_wat_nid_22 shard that is. So the
+    -- suffix is _02 here, even though _02 was the wrong guess for kab_08.
+    -- That is the whole point of checking each one against the game.
+    { label = 'Six Feet Under (Lely Hein)',     record = 'Items.ma_wat_nid_22_onscreen_02',
+      note = 'District corrected to wat_nid_22, and the suffix read off this build: _01 does not exist on 2.5, _02 is the only one that does.' },
     -- Where the Bodies Hit the Floor needs TWO conversations read:
     -- "Hoof and Sanders" and "Brick and Ellis". Confirmed working in game
     -- 2.5 on 2026-11-07:
@@ -213,8 +217,20 @@ return {
     { label = 'Ticket to the Major Leagues',
       record = 'Items.ma_wat_lch_06_onscreen_01',
       note = 'Identified: wat_lch_06 is this sighting, not Where the Bodies Hit the Floor as the community list claimed.' },
-    { label = 'Bloody Ritual',                  record = 'Items.ma_wat_nid_15_onscreen_01',
-      note = 'Quest id corrected to wat_nid_15. Suffix still unverified.' },
+    -- Bloody Ritual. _01 is not on 2.5, and the live TweakDB holds THREE
+    -- ma_wat_nid_15 shards. Nothing in an id says which one carries readable
+    -- text -- "go_clean_after_elly" above is the standing proof of that -- so
+    -- all three are offered instead of one being picked and quietly being the
+    -- wrong one for the third time in this file.
+    { label = 'Bloody Ritual (psycho)',
+      record = 'Items.ma_wat_nid_15_onscreen_psycho',
+      note = 'One of three ma_wat_nid_15 shards on this build. Likeliest of the three for a cyberpsycho sighting. If it reads blank, try the other two.' },
+    { label = 'Bloody Ritual (mls)',
+      record = 'Items.ma_wat_nid_15_onscreen_mls',
+      note = 'One of three ma_wat_nid_15 shards on this build. Try this if the psycho one reads blank.' },
+    { label = 'Bloody Ritual (02)',
+      record = 'Items.ma_wat_nid_15_onscreen_02',
+      note = 'One of three ma_wat_nid_15 shards on this build. The plain numbered suffix, which is the one that rendered blank for kab_08.' },
     { label = 'Discount Doc (Chase Coley)',     record = 'Items.ma_std_rcr_11_onscreen_01' },
   },
 
