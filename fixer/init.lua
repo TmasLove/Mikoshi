@@ -46,6 +46,10 @@ local state = {
     armed       = false,   -- force-complete safety
     records     = {},      -- id -> true/false, filled at onInit
     missing     = {},      -- the rows whose record is not on this build
+    -- The tracking guard. list holds { key, label } for quests that are not
+    -- allowed to hold journal focus; lastGood is the entry focus goes back to.
+    guard       = { on = false, list = {}, lastGood = nil, at = 0,
+                    hits = 0, fails = 0, keySrc = nil, err = nil },
     found       = {},      -- missing id -> candidates read out of live TweakDB
     fields      = {},      -- template input boxes
     probe       = { fact = 'ig_phone_manager_off', item = 'Items.money' },
@@ -203,6 +207,11 @@ local function resolveApi()
 
     api.journalOk = fnExists(jm, 'GetTrackedEntry') and fnExists(jm, 'GetParentEntry')
                 and fnExists(jm, 'GetEntryHash') and fnExists(jm, 'ChangeEntryStateByHash')
+
+    -- Re-tracking needs one more method than reading does, so it is probed
+    -- separately: the guard can be missing while the rest of the journal
+    -- tools work fine.
+    api.trackOk = fnExists(jm, 'TrackEntry')
 
     api.stateSucceeded, api.stateSrc, api.stateNamed =
         resolveEnum({ 'gameJournalEntryState', 'JournalEntryState' }, 'Succeeded', 3)
@@ -466,6 +475,147 @@ local function resolveTrackedQuest()
 end
 
 -- forceCompleteTracked was removed with the button that called it.
+
+-- ---------------------------------------------------------------------------
+-- Identifying a journal entry well enough to block it.
+--
+-- Not by hash alone. GetEntryHash reads 0 for a top-level quest on this build
+-- -- that is exactly why the old watch card showed a useless 0 -- and a key of
+-- 0 would match everything or nothing depending on which way you squint. So
+-- try the accessors in order, reject an answer that is empty or zero, and
+-- record which one actually answered, the same way the record browser does
+-- rather than assuming one and silently matching nothing.
+-- ---------------------------------------------------------------------------
+local ENTRY_KEYS = {
+    { 'GetId()',        function(e) return e:GetId() end },
+    { 'GetPath()',      function(e) return e:GetPath() end },
+    { 'GetEntryHash()', function(e) return api.journal:GetEntryHash(e) end },
+}
+
+local function entryKey(e)
+    if e == nil then return nil end
+    for i, a in ipairs(ENTRY_KEYS) do
+        local ok, v = pcall(a[2], e)
+        if ok and v ~= nil then
+            local s = tostring(v)
+            if s ~= '' and s ~= '0' and s ~= 'nil' then
+                state.guard.keySrc = ENTRY_KEYS[i][1]
+                return s, i
+            end
+        end
+    end
+    return nil
+end
+
+-- A readable label for a blocked quest. The key may be a hash, which tells a
+-- player nothing, so keep whatever the entry can give us alongside it.
+local function entryLabel(e)
+    for _, getter in ipairs({
+        function() return e:GetTitle(api.journal) end,
+        function() return e:GetId() end,
+        function() return e:GetPath() end,
+    }) do
+        local ok, v = pcall(getter)
+        if ok and v ~= nil and tostring(v) ~= '' then return tostring(v) end
+    end
+    return nil
+end
+
+local function saveBlocked()
+    pcall(function()
+        local f = io.open('blocked.txt', 'w')
+        if not f then return end
+        for _, b in ipairs(state.guard.list) do
+            f:write(b.key .. '\t' .. (b.label or '') .. '\n')
+        end
+        f:write('#on\t' .. tostring(state.guard.on) .. '\n')
+        f:close()
+    end)
+end
+
+local function loadBlocked()
+    pcall(function()
+        local f = io.open('blocked.txt', 'r')
+        if not f then return end
+        for line in f:lines() do
+            local key, label = line:match('^([^\t]*)\t?(.*)$')
+            if key == '#on' then
+                state.guard.on = (label == 'true')
+            elseif key and #key > 0 then
+                state.guard.list[#state.guard.list + 1] = { key = key, label = label }
+            end
+        end
+        f:close()
+    end)
+end
+
+local function isBlocked(key)
+    if key == nil then return false end
+    for _, b in ipairs(state.guard.list) do
+        if b.key == key then return true end
+    end
+    return false
+end
+
+-- ---------------------------------------------------------------------------
+-- The guard itself, run from onUpdate because the theft happens while you are
+-- playing with no overlay open, which is precisely when onDraw is not running.
+--
+-- It does not touch quest state. TrackEntry moves which quest the HUD points
+-- at and nothing else, so the worst case is the marker going to the wrong
+-- place, and the fix is to track something in the journal yourself.
+-- ---------------------------------------------------------------------------
+local function guardTick(dt)
+    local g = state.guard
+    if not g.on or #g.list == 0 then return end
+    if not (api.journalOk and api.trackOk) then return end
+
+    -- Four times a second. The journal is not worth a per-frame walk, and the
+    -- hand-over is not something a player can perceive inside 250ms.
+    g.at = g.at + (dt or 0)
+    if g.at < 0.25 then return end
+    g.at = 0
+
+    local ok, tracked = pcall(function() return api.journal:GetTrackedEntry() end)
+    if not ok or tracked == nil then return end
+
+    -- Match on the top-level quest, not on the objective, because the game
+    -- tracks an objective inside the quest and that is a different entry.
+    local node, depth = tracked, 0
+    while depth < 8 do
+        local ok2, parent = pcall(function() return api.journal:GetParentEntry(node) end)
+        if not ok2 or parent == nil then break end
+        node, depth = parent, depth + 1
+    end
+
+    if not isBlocked(entryKey(node)) then
+        -- Whatever you were tracking when nothing was wrong is where focus
+        -- goes back to. Captured here rather than asked for, so the guard
+        -- needs no setup beyond naming the quest to block.
+        g.lastGood = tracked
+        return
+    end
+
+    if g.lastGood == nil then
+        g.err = 'blocked quest is tracked, but nothing else has been tracked yet this session'
+        return
+    end
+
+    local put = pcall(function() api.journal:TrackEntry(g.lastGood) end)
+    if put then
+        g.hits = g.hits + 1
+        g.err = nil
+    else
+        -- A handle kept across frames can go stale. Rather than retry four
+        -- times a second forever, stop and say so.
+        g.fails = g.fails + 1
+        if g.fails >= 5 then
+            g.on = false
+            g.err = 'TrackEntry failed five times, so the guard switched itself off'
+            note('guard off: %s', g.err)
+        end
+    end
+end
 
 -- ===========================================================================
 -- small ImGui helpers
@@ -846,6 +996,37 @@ local function statusStrip()
     textc(col, last)
 end
 
+-- ---------------------------------------------------------------------------
+-- A filled block of colour WITHOUT the draw list.
+--
+-- CET 1.38.1 does not bind ImGui's draw list, so every AddRectFilled in this
+-- file is dead on a real install and the window falls back to grey separators.
+-- ProgressBar is the one widget that paints a filled rectangle of arbitrary
+-- height, so a bar at 100% with its fill pushed to the accent IS a rule, and
+-- the overlay string is emptied so it does not print "100%" across it.
+-- ---------------------------------------------------------------------------
+local function colourBar(c, w, h)
+    if not (caps.ProgressBar and caps.PushStyleColor and caps.PopStyleColor) then
+        return false
+    end
+    local pushed = 0
+    local function pc(n, col, al)
+        local idx
+        if not pcall(function() idx = ImGuiCol[n] end) or idx == nil then return end
+        if pcall(function() ImGui.PushStyleColor(idx, col[1], col[2], col[3], al or 1.0) end) then
+            pushed = pushed + 1
+        end
+    end
+    pc('PlotHistogram', c)
+    pc('FrameBg', c, 0.0)
+    local ok = pcall(function() ImGui.ProgressBar(1.0, w or -1, h or 3, '') end)
+    if not ok then
+        ok = pcall(function() ImGui.ProgressBar(1.0, w or -1, h or 3) end)
+    end
+    if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
+    return ok
+end
+
 -- A thin accent rule, drawn where the draw list exists. Section headers get a
 -- hairline instead of relying on ImGui's own grey separator.
 local function accentRule(alpha)
@@ -867,6 +1048,13 @@ local function section(title, icon)
     -- of text reads as one more row. Use the real widget where it exists.
     textc(COL.accent, label)
     if accentRule() then return end
+    -- No draw list, which is the normal case on CET. Two coloured segments
+    -- still read as a rule, where ImGui's grey Separator reads as nothing.
+    if colourBar(A(), 46, 3) then
+        same()
+        if colourBar(B(), -1, 3) then return end
+        return
+    end
     if caps.SeparatorText then pcall(function() ImGui.Separator() end) end
 end
 
@@ -1062,6 +1250,56 @@ local function tabQuestFixes()
     end
     sep()
 
+    section('stop a quest taking focus', 'PinOff')
+    wrapped('Finishing anything hands the journal back to the main story, which is a problem when the main story is the one quest you are saving for last. A blocked quest cannot hold focus: the moment it takes it, focus goes back to whatever you were tracking before.')
+    if not api.trackOk then
+        textc(COL.bad, 'gameJournalManager:TrackEntry is not on this build, so focus cannot be handed back')
+    else
+        local g = state.guard
+        g.on = ImGui.Checkbox('guard the tracked quest', g.on)
+        same()
+        if ImGui.Button('Save##guardsave') then saveBlocked(); note('guard settings saved') end
+
+        -- Blocking by id typed from memory is how three shard ids ended up
+        -- wrong in this project. Press it while the quest is tracked and the
+        -- game supplies its own name for it.
+        if ImGui.Button('Block the quest I am tracking now##guardadd') then
+            local q = resolveTrackedQuest()
+            local key = entryKey(q)
+            if key == nil then
+                note('FAIL could not read an id for the tracked quest, so it cannot be blocked')
+            elseif isBlocked(key) then
+                note('that quest is already blocked')
+            else
+                g.list[#g.list + 1] = { key = key, label = entryLabel(q) or key }
+                saveBlocked()
+                note('OK  blocked %s', g.list[#g.list].label)
+            end
+        end
+        hint('Track the quest in your journal first, then press this. Mikoshi reads whatever your build calls it rather than guessing an id.')
+
+        if #g.list == 0 then
+            textc(COL.dim, 'Nothing blocked. Track Nocturne Op55N1, press the button, then track what you actually want to play.')
+        else
+            for i = #g.list, 1, -1 do
+                statusIcon(g.on and 'ok' or 'warn')
+                sameAt(30); ImGui.Text(g.list[i].label or g.list[i].key)
+                sameAt(340)
+                if ImGui.Button('Unblock##gub' .. i) then
+                    table.remove(g.list, i); saveBlocked()
+                end
+            end
+            textc(COL.dim, string.format('%s key read via %s. Handed focus back %d time(s) this session.',
+                ic('Key'), g.keySrc or 'not read yet', g.hits))
+            if g.err then textc(COL.warn, g.err) end
+            if not g.on then
+                textc(COL.warn, 'The guard is off, so these are only remembered, not enforced.')
+            end
+        end
+        textc(COL.dim, 'Tracking only. This moves the marker, it does not touch quest state, and nothing here appears in Undo because there is nothing to undo.')
+    end
+    sep()
+
     -- REMOVED: force-complete of the tracked quest. It wrote a journal state
     -- with no previous value to restore, and on this build the enum names did
     -- not resolve, so it fell back to the community's hard-coded 3 and 2. A
@@ -1247,18 +1485,24 @@ local function tabWorld()
         -- wiki documents no weather commands at all. So ask the game for the
         -- real record ids instead, the same way Browse does.
         if state.weather == nil then
+            -- Try every type and keep the richest, instead of stopping at the
+            -- first that answers at all. gamedataWeather_Record returns two
+            -- records on 2.5, so breaking on "more than zero" settled for two
+            -- weather states when the state list is the other type.
             local found = {}
-            for _, t in ipairs({ 'gamedataWeather_Record', 'gamedataWeatherState_Record' }) do
+            for _, t in ipairs({ 'gamedataWeatherState_Record', 'gamedataWeather_Record',
+                                 'gamedataEnvironmentAreaType_Record' }) do
+                local got = {}
                 local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
                 if ok and recs then
                     pcall(function()
                         for _, r in ipairs(recs) do
                             local n = recordName(r)
-                            if n then found[#found + 1] = n end
+                            if n then got[#got + 1] = n end
                         end
                     end)
                 end
-                if #found > 0 then state.weatherType = t; break end
+                if #got > #found then found, state.weatherType = got, t end
             end
             table.sort(found)
             state.weather = found
@@ -1518,9 +1762,21 @@ end
 local function localise(v)
     local s = asString(v)
     if not s then return nil end
+    -- Only something shaped like LocKey#12345 is a key that can fail to
+    -- resolve. Anything else is already the text.
+    local isKey = s:find('^LocKey#') ~= nil
     if hasGlobal('GetLocalizedText') then
         local ok, t = pcall(function() return GetLocalizedText(s) end)
-        if ok and type(t) == 'string' and #t > 0 and t ~= s then return t end
+        if ok and type(t) == 'string' and #t > 0 then
+            -- GetLocalizedText echoing its input back means the key did not
+            -- resolve -- but ONLY when the input was a key. A displayName that
+            -- is already plain text comes back unchanged because there is
+            -- nothing to translate, and the old "t ~= s" rejected exactly
+            -- that. Since the obtainable-by-V filter keeps an item only if it
+            -- has a readable name, rejecting every plain name hid all 2074
+            -- pieces of clothing and all 1828 weapons behind "0 obtainable".
+            if t ~= s or not isKey then return t end
+        end
     end
     if fnExists(Game, 'GetLocalizedTextByKey') then
         local ok, t = pcall(function() return Game.GetLocalizedTextByKey(v) end)
@@ -1559,6 +1815,7 @@ end
 local function computePlayable(i)
     local cache = state.browse.cache[i]
     if not cache or not cache.names then return end
+    cache.playableTried = true
     local b, keep = BROWSE[i], {}
     for n = 1, #cache.names do
         local id  = cache.names[n]
@@ -1574,6 +1831,20 @@ local function computePlayable(i)
         end
         if ok then keep[#keep + 1] = id end
     end
+
+    -- A filter that keeps nothing is a broken filter, not an empty category.
+    -- The game does not ship 2074 pieces of clothing that V cannot wear. When
+    -- that happens, show everything and say so, because a list with one wrong
+    -- row in it is worth more than a list with no rows at all.
+    if #keep == 0 and #cache.names > 0 then
+        cache.playable = nil
+        cache.filterBroke = string.format(
+            'the obtainable-by-V filter matched none of the %d %s records, so it is being ignored',
+            #cache.names, string.lower(b.label))
+        note('%s: filter kept 0 of %d, ignoring it', b.label, #cache.names)
+        return
+    end
+    cache.filterBroke = nil
     cache.playable = keep
     note('%s: %d of %d look obtainable by V', b.label, #keep, #cache.names)
 end
@@ -1707,13 +1978,19 @@ local function tabBrowse()
 
     local wasFiltered = state.browse.playableOnly
     state.browse.playableOnly = ImGui.Checkbox('obtainable by V only', state.browse.playableOnly)
-    if state.browse.playableOnly and (not cache.playable or wasFiltered ~= true) then
+    -- Keyed on "have we tried", not on "is there a result". The filter is now
+    -- allowed to come back with nothing usable, and keying on the result meant
+    -- that outcome re-swept 2074 records, with a TweakDB:GetFlat on each, on
+    -- every frame the tab was open.
+    if state.browse.playableOnly and (not cache.playableTried or wasFiltered ~= true) then
         computePlayable(i)
     end
 
     -- The filtered list is what we page through when the box is ticked.
     local list = (state.browse.playableOnly and cache.playable) or cache.names
-    if state.browse.playableOnly and cache.playable then
+    if cache.filterBroke then
+        textc(COL.warn, ic('AlertCircle') .. cache.filterBroke)
+    elseif state.browse.playableOnly and cache.playable then
         textc(COL.dim, ('%d shown, %d hidden as NPC, debug or scene-only.')
             :format(#cache.playable, #cache.names - #cache.playable))
     else
@@ -1838,8 +2115,27 @@ local function paletteGrid()
         if i > 1 and (i % 3) ~= 1 then same() end
         local hit
         if plain then
-            if state.theme == i then statusIcon('ok'); same() end
-            hit = ImGui.Button(THEMES[i].name .. '##th' .. i)
+            -- Paint the button in the palette it selects. Without this the
+            -- picker is nine identical grey buttons with faction names on
+            -- them, which is exactly as much use as a list.
+            local th, on = THEMES[i], (state.theme == i)
+            local pushed = 0
+            local function pc(n, c, al)
+                local idx
+                if not pcall(function() idx = ImGuiCol[n] end) or idx == nil then return end
+                if pcall(function() ImGui.PushStyleColor(idx, c[1], c[2], c[3], al or 1.0) end) then
+                    pushed = pushed + 1
+                end
+            end
+            if caps.style then
+                pc('Button',        on and th.a or mix(th.bg, th.a, 0.42))
+                pc('ButtonHovered', mix(th.a, { 1, 1, 1 }, 0.22))
+                pc('ButtonActive',  th.a)
+                pc('Text',          onCol(on and th.a or mix(th.bg, th.a, 0.42)))
+                pc('Border',        th.b, on and 1.0 or 0.35)
+            end
+            hit = ImGui.Button('  ' .. th.name .. '  ##th' .. i)
+            if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
         else
             hit = paletteChip(i, 136, 46)
         end
@@ -1935,8 +2231,24 @@ local function tabDiagnostics()
     textc(COL.dim, ic('ContentSave') .. 'Saved by name beside the mod, so it survives a reload.')
     sep()
 
-    textc(state.fancy == false and COL.warn or COL.ok,
-        'banner: ' .. (state.fancy == false and 'flat fallback, draw list unavailable' or 'drawn with the ImGui draw list'))
+    if state.fancy == false then
+        -- "draw list unavailable" was true and useless. Name the call that is
+        -- missing, because the answer decides whether this is fixable here or
+        -- a limit of CET itself.
+        local miss = {}
+        for _, n in ipairs({ 'GetWindowDrawList', 'GetCursorScreenPos',
+                             'GetContentRegionAvail', 'Dummy' }) do
+            if not caps[n] then miss[#miss + 1] = n end
+        end
+        if #miss > 0 then
+            textc(COL.warn, 'banner: flat fallback. CET does not bind ' .. table.concat(miss, ', '))
+        else
+            textc(COL.warn, 'banner: flat fallback. Every call is bound, so a draw call itself raised')
+        end
+        textc(COL.dim, 'Not a fault in your install. Rules, bars and the palette chips are built from widgets instead, which is why they still have colour.')
+    else
+        textc(COL.ok, 'banner: drawn with the ImGui draw list')
+    end
     textc(Icons and COL.ok or COL.warn,
         'IconGlyphs: ' .. (Icons and ('loaded via require("' .. tostring(iconPath) .. '")')
                                  or ('every path failed: ' .. tostring(iconErr))))
@@ -2087,11 +2399,17 @@ registerForEvent('onInit', function()
     detectImGui()
     loadTheme()
     loadWatch()
+    loadBlocked()
     resolveApi()
     verifyAll()
     mod.ready = true
     note('Mikoshi ready. %s, %s.', api.setFactSrc or 'no fact API',
         api.journalOk and 'journal OK' or 'journal incomplete')
+end)
+
+-- The guard has to run with the overlay shut, which is when onDraw does not.
+registerForEvent('onUpdate', function(dt)
+    pcall(guardTick, dt)
 end)
 
 registerForEvent('onOverlayOpen',  function() state.overlayOpen = true  end)
