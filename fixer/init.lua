@@ -66,8 +66,7 @@ local state = {
     showCoords  = false,
     watch       = { list = {}, prev = {}, changedAt = {}, input = "" },
     tp          = { cur = nil, text = '', name = '', saved = {} },
-    weather     = nil,  -- filled on first use of the World tab
-    weatherType = nil,
+    -- weather/weatherType went with the setter: nothing left to cache.
     browse      = { idx = 1, q = '', cache = {}, accessor = nil, desc = true, playableOnly = true },
     probeResult = '',
 }
@@ -398,15 +397,25 @@ local ACTIONS = {
         run   = function(h) return pcall(function() Game.GetTimeSystem():SetGameTimeByHMS(h, 0, 0) end) end,
         needs = 'Game.GetTimeSystem',
     },
+    -- Weather cannot be SET on 2.5 and this is not a guess.
+    --
+    -- Dumped on 2026-11-08: Game.GetWeatherSystem() returns a
+    -- worldWeatherScriptInterface, and the whole of it is
+    -- RegisterWeatherListener, UnregisterWeatherListener, GetRainMoisture,
+    -- GetRainPuddles, GetRainIntensity, GetRainIntensityType, ToString,
+    -- GetClassName, IsA, IsExactlyA. There is no SetWeather on the object, and
+    -- the error said so in as many words: "attempt to call method 'SetWeather'
+    -- (a nil value)".
+    --
+    -- So the buttons are gone and what the interface actually offers is read
+    -- instead. Four read-only rain values is a smaller feature than eight
+    -- weather buttons, and it is a real one.
     weather = {
         probe = function() return fnExists(Game, 'GetWeatherSystem') end,
-        -- Capture the return. The first version reported OK whenever the call
-        -- did not raise, which is why weather "worked" and nothing changed.
-        run = function(s)
-            local ok, res = pcall(function()
-                return Game.GetWeatherSystem():SetWeather(s, 10.0, 0)
-            end)
-            return ok, res
+        read = function(fn)
+            local ok, v = pcall(function() return Game.GetWeatherSystem()[fn](Game.GetWeatherSystem()) end)
+            if ok and v ~= nil then return v end
+            return nil
         end,
         needs = 'Game.GetWeatherSystem',
     },
@@ -632,6 +641,28 @@ end
 local function resolveTrackedQuest()
     local chain, err = trackedChain()
     if not chain then return nil, err, 0 end
+
+    -- Ask the node what it IS, before falling back to guessing by position.
+    --
+    -- Taking the outermost node that could name itself was still wrong: on
+    -- 2026-11-08 blocking reported "OK blocked quests", because the outermost
+    -- nameable thing is a container whose title is literally "quests". The
+    -- weather dump showed IsA(className) on these script objects, so there is
+    -- no need to guess: walk up from the tracked entry and stop at the first
+    -- node that says it is a quest.
+    for i = 1, #chain do
+        local isQuest = false
+        pcall(function() isQuest = chain[i]:IsA('gameJournalQuest') end)
+        if isQuest then
+            local key, which = entryKey(chain[i])
+            if key then return chain[i], nil, i - 1, key, which end
+        end
+    end
+
+    -- No IsA on this build, or nothing in the chain admits to being a quest.
+    -- Fall back to the outermost nameable node, which is better than nothing
+    -- and is why the label is shown next to the key: a container called
+    -- "quests" is visibly not your quest.
     for i = #chain, 1, -1 do
         local key, which = entryKey(chain[i])
         if key then return chain[i], nil, i - 1, key, which end
@@ -1832,71 +1863,46 @@ local function tabWorld()
 
     if section('weather') then
         if ACTIONS.weather.probe() then
-            -- The eight names shipped here were community guesses and the official
-            -- wiki documents no weather commands at all. So ask the game for the
-            -- real record ids instead, the same way Browse does.
-            if state.weather == nil then
-                -- Try every type and keep the richest, instead of stopping at the
-                -- first that answers at all. gamedataWeather_Record returns two
-                -- records on 2.5, so breaking on "more than zero" settled for two
-                -- weather states when the state list is the other type.
-                local found = {}
-                for _, t in ipairs({ 'gamedataWeatherState_Record', 'gamedataWeather_Record',
-                                     'gamedataEnvironmentAreaType_Record' }) do
-                    local got = {}
-                    local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
-                    if ok and recs then
-                        pcall(function()
-                            for _, r in ipairs(recs) do
-                                local n = recordName(r)
-                                if n then got[#got + 1] = n end
-                            end
-                        end)
-                    end
-                    if #got > #found then found, state.weatherType = got, t end
-                end
-                table.sort(found)
-                state.weather = found
-                note('weather records found: %d%s', #found,
-                    state.weatherType and (' via ' .. state.weatherType) or ' (falling back to guessed names)')
-            end
+            wrapped('Weather cannot be changed on 2.5. The buttons that were here called SetWeather, and the weather system does not have one: dumping it on 2026-11-08 listed ten methods and every one of them reads. The error said it outright, "attempt to call method SetWeather (a nil value)", and no spelling of a weather name fixes a method that is not there.')
+            wrapped('What it does expose is rain, live. Not a replacement for setting the weather, but it is true, which the buttons were not.')
+            sep()
 
-            local live = #state.weather > 0
-            if live then
-                textc(COL.ok, ('%d real state ids read from your install'):format(#state.weather))
-            else
-                textc(COL.warn, 'No weather records found. These names are unverified guesses.')
-            end
-
-            local list = live and state.weather or nil
-            if list then
-                for i = 1, math.min(#list, 24) do
-                    if i > 1 and (i % 2) ~= 1 then same() end
-                    if ImGui.Button(list[i] .. '##wl' .. i) then
-                        local ok, res = ACTIONS.weather.run(list[i])
-                        note(verdict('weather -> ' .. list[i], ok, res,
-                            'Give it the ten second transition before deciding it failed.'))
-                    end
-                end
-            else
-                for i, w in ipairs(data.weather or {}) do
-                    if i > 1 and (i % 3) ~= 1 then same() end
-                    if ImGui.Button(w.label .. '##w' .. i) then
-                        local ok, res = ACTIONS.weather.run(w.state)
-                        note(verdict('weather -> ' .. w.state, ok, res, nil))
-                    end
+            local rows = {
+                { 'Rain intensity', 'GetRainIntensity' },
+                { 'Rain moisture',  'GetRainMoisture' },
+                { 'Rain puddles',   'GetRainPuddles' },
+                { 'Intensity type', 'GetRainIntensityType' },
+            }
+            local anyRead = false
+            for _, r in ipairs(rows) do
+                local v = ACTIONS.weather.read(r[2])
+                if v ~= nil then anyRead = true end
+                statusIcon(v ~= nil and 'ok' or 'warn')
+                sameAt(30);  ImGui.Text(r[1])
+                sameAt(190)
+                if v == nil then
+                    textc(COL.dim, 'could not read')
+                elseif type(v) == 'number' then
+                    textc(COL.cyan, string.format('%.3f', v))
+                else
+                    textc(COL.cyan, tostring(v))
                 end
             end
+            if not anyRead then
+                textc(COL.warn, 'None of the four read back on this build either.')
+            end
+            sep()
 
             if ImGui.Button('Dump the weather system to the log##dumpws') then
                 local ok, out = pcall(function() return Dump(Game.GetWeatherSystem(), false) end)
                 if ok then
                     print('[Mikoshi] weather system dump follows'); print(tostring(out))
-                    note('OK  dumped the weather system. Check the console for the real method names.')
+                    note('OK  dumped the weather system. The console has every method it really has.')
                 else
                     note('FAIL Dump refused: ' .. tostring(out))
                 end
             end
+            hint('This is how the setter was ruled out rather than guessed at. If a later patch adds one, it will show up here.')
         else
             textc(COL.bad, ACTIONS.weather.needs .. ' is not available on this build')
         end

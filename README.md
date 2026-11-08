@@ -85,6 +85,12 @@ behaviour in a tool whose job is to tell you whether a fix worked.
 
 ## What is deliberately not here
 
+- **Setting the weather.** Dumping `Game.GetWeatherSystem()` on 2.5 returns a
+  `worldWeatherScriptInterface` whose entire method list reads: rain intensity,
+  moisture, puddles, intensity type, and listener registration. There is no
+  `SetWeather` on it, and no spelling of a weather name fixes a method that is
+  not there. The World tab shows the four rain values it does expose instead.
+
 - **Setting an attribute directly.** It moved the number and nothing else:
   the attribute read 20 afterwards and every perk that attribute gates stayed
   locked, because the number is a stat and the unlocking is done by the

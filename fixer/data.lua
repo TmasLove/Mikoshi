@@ -185,21 +185,11 @@ return {
   -- the story does next because of them.
 
 
-  -- ========================================================================
-  -- WEATHER. Passed to the weather system by name. The system itself is
-  -- capability-checked at load; these state names are not, so a wrong one
-  -- simply does nothing.
-  -- ========================================================================
-  weather = {
-    { label = 'Sunny',        state = '24h_weather_sunny' },
-    { label = 'Light clouds', state = '24h_weather_light_clouds' },
-    { label = 'Cloudy',       state = '24h_weather_cloudy' },
-    { label = 'Rain',         state = '24h_weather_rain' },
-    { label = 'Toxic rain',   state = '24h_weather_toxic_rain' },
-    { label = 'Pollution',    state = '24h_weather_pollution' },
-    { label = 'Fog',          state = '24h_weather_fog' },
-    { label = 'Sandstorm',    state = '24h_weather_sandstorm' },
-  },
+  -- WEATHER was removed on 2026-11-08. These eight state names were never the
+  -- problem. Dumping Game.GetWeatherSystem() showed it has no SetWeather at
+  -- all, so there was nothing to pass them to, and no spelling of a weather
+  -- name fixes a method that is not there. The World tab reads the rain values
+  -- the interface does expose instead.
 
   -- ========================================================================
   -- SHARDS: cyberpsycho and gig shards that fail to spawn on the body.
