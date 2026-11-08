@@ -45,7 +45,7 @@ To bind a key: open the overlay, go to **Bindings**, find "Mikoshi: pin the watc
 
 **Browse** — reads every clothing, weapon and vehicle record out of *your* running game, with search, readable names, rarity colours, and a filter for what V can actually obtain. On a 2.5 install that is roughly 2,000 clothing, 1,800 weapon and 1,400 vehicle records. Because they come from your game rather than a list, the ids are correct for whatever patch you are on.
 
-**Diagnostics** — what your build actually exposes, manual record and fact checks, and six colour palettes.
+**Diagnostics** — what your build actually exposes, manual record and fact checks, and nine colour palettes. A palette sets the whole window and not just the accent, so the base, the panels, the buttons and the greys all change with it.
 
 **Undo** — every fact write with its previous value, one click from being restored.
 

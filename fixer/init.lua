@@ -488,18 +488,99 @@ local function sameAt(x) if caps.SameLine then pcall(function() ImGui.SameLine(x
 -- The default is a slightly deepened amber rather than full #FCEE0A, which
 -- reads as a highlighter across a large filled bar.
 -- ---------------------------------------------------------------------------
+-- Three colours per palette, not two: an accent, a secondary, and the base the
+-- whole window is built out of. The base is the one that was missing. Every
+-- palette used to share one hardcoded charcoal body, so switching from Arasaka
+-- to Netrunner recoloured the buttons and left the room identical. Now Arasaka
+-- is a red-black room and Netrunner is an indigo one.
 local THEMES = {
-    { name = 'Samurai',   a = { 0.92, 0.80, 0.10 }, b = { 0.12, 0.80, 0.88 } },
-    { name = 'Arasaka',   a = { 0.84, 0.13, 0.25 }, b = { 0.78, 0.80, 0.84 } },
-    { name = 'Militech',  a = { 0.24, 0.54, 0.90 }, b = { 0.95, 0.70, 0.20 } },
-    { name = 'Netrunner', a = { 0.10, 0.86, 0.94 }, b = { 0.95, 0.20, 0.62 } },
-    { name = 'Trauma',    a = { 0.90, 0.92, 0.94 }, b = { 0.90, 0.17, 0.23 } },
-    { name = 'Kang Tao',  a = { 0.30, 0.78, 0.48 }, b = { 0.85, 0.85, 0.30 } },
+    { name = 'Samurai',   note = 'Chrome yellow on tar. The band on the jacket.',
+      a = { 0.94, 0.82, 0.10 }, b = { 0.12, 0.80, 0.88 }, bg = { 0.042, 0.038, 0.026 } },
+    { name = 'Arasaka',   note = 'Corporate black with one red stripe through it.',
+      a = { 0.86, 0.13, 0.25 }, b = { 0.80, 0.82, 0.86 }, bg = { 0.054, 0.020, 0.024 } },
+    { name = 'Militech',  note = 'Steel blue and gold. Military surplus.',
+      a = { 0.26, 0.56, 0.92 }, b = { 0.96, 0.70, 0.20 }, bg = { 0.022, 0.034, 0.058 } },
+    { name = 'Netrunner', note = 'Cyan and magenta, straight off a braindance deck.',
+      a = { 0.10, 0.86, 0.94 }, b = { 0.96, 0.20, 0.62 }, bg = { 0.026, 0.028, 0.056 } },
+    { name = 'Voodoo',    note = 'Pacifica. Jungle green under wet neon.',
+      a = { 0.22, 0.86, 0.52 }, b = { 0.88, 0.26, 0.76 }, bg = { 0.018, 0.040, 0.032 } },
+    { name = 'Nomad',     note = 'Badlands dust and rust. Warmer than the city.',
+      a = { 0.94, 0.56, 0.20 }, b = { 0.80, 0.72, 0.52 }, bg = { 0.056, 0.038, 0.024 } },
+    { name = 'Kang Tao',  note = 'Jade and brass.',
+      a = { 0.28, 0.80, 0.50 }, b = { 0.88, 0.82, 0.32 }, bg = { 0.024, 0.038, 0.028 } },
+    { name = 'Trauma',    note = 'Emergency white, alert red. Loud on purpose.',
+      a = { 0.90, 0.92, 0.94 }, b = { 0.94, 0.18, 0.24 }, bg = { 0.046, 0.048, 0.056 } },
+    { name = 'Corpo',     note = 'Plaza daylight. The only bright one.',
+      a = { 0.09, 0.30, 0.56 }, b = { 0.74, 0.40, 0.08 }, bg = { 0.87, 0.88, 0.90 },
+      light = true },
 }
 
 local function theme() return THEMES[state.theme] or THEMES[1] end
 local function A() return theme().a end
 local function B() return theme().b end
+
+-- Text drawn on top of a filled block gets its colour CHOSEN for contrast
+-- rather than assumed dark. The banner used to paint near-black letters on
+-- whatever the accent happened to be: fine on Samurai yellow, close to
+-- illegible on Arasaka red.
+--
+-- The choice is measured, not guessed from a brightness threshold. A plain
+-- 0.299/0.587/0.114 average put Militech's blue just under the cut and so
+-- picked white at 3.1:1, where black on the same blue gives 6.0:1. So:
+-- WCAG relative luminance, sRGB linearised, and take whichever of the two
+-- inks actually wins on this colour.
+local function lin(v)
+    if v <= 0.03928 then return v / 12.92 end
+    return ((v + 0.055) / 1.055) ^ 2.4
+end
+
+local function relLum(c)
+    return 0.2126 * lin(c[1]) + 0.7152 * lin(c[2]) + 0.0722 * lin(c[3])
+end
+
+local function contrast(f, b)
+    local l1, l2 = relLum(f), relLum(b)
+    if l2 > l1 then l1, l2 = l2, l1 end
+    return (l1 + 0.05) / (l2 + 0.05)
+end
+
+local INK_DARK, INK_LIGHT = { 0.04, 0.04, 0.05 }, { 0.97, 0.97, 0.95 }
+local function onCol(c)
+    if contrast(INK_DARK, c) >= contrast(INK_LIGHT, c) then return INK_DARK end
+    return INK_LIGHT
+end
+
+local function mix(c1, c2, t)
+    return { c1[1] + (c2[1] - c1[1]) * t,
+             c1[2] + (c2[2] - c1[2]) * t,
+             c1[3] + (c2[3] - c1[3]) * t }
+end
+
+local function rgba(c, al) return { c[1], c[2], c[3], al or 1.0 } end
+
+-- Every surface in the window comes from this: the palette's own base, lifted
+-- toward white on a dark theme or pressed toward black on a light one, and
+-- optionally leaned toward the accent. One function, so a new palette is still
+-- three colours and not thirty.
+local function surf(t, lean)
+    local th = theme()
+    local c = mix(th.bg, th.light and { 0, 0, 0 } or { 1, 1, 1 }, t)
+    if lean and lean > 0 then c = mix(c, th.a, lean) end
+    return c
+end
+
+local function txtCol()
+    return theme().light and { 0.10, 0.11, 0.13 } or { 0.91, 0.91, 0.88 }
+end
+
+-- Green means good and red means bad on every palette, so these are not
+-- themed. They are kept here, apart from COL, because COL is rebuilt from the
+-- palette every frame and would otherwise darken its own darkening.
+local SEM = {
+    ok   = { 0.36, 0.92, 0.55 },
+    warn = { 1.00, 0.78, 0.20 },
+    bad  = { 1.00, 0.24, 0.35 },
+}
 
 -- Floats to ImGui's packed 0xAABBGGRR, which is byte order, not RGB.
 local function pack(c, alpha)
@@ -512,22 +593,31 @@ end
 
 local function mul(c, f) return { c[1] * f, c[2] * f, c[3] * f } end
 
--- The theme choice outlives a reload, stored as one number beside the mod.
+-- The choice outlives a reload, stored beside the mod -- as the palette's
+-- NAME, not its index. The file used to hold a number, which meant inserting a
+-- palette moved anyone who had saved one onto a different theme without
+-- telling them. A bare number still loads, for a theme.txt written by 1.0.
 local function saveTheme()
     pcall(function()
         local f = io.open('theme.txt', 'w')
-        if f then f:write(tostring(state.theme)); f:close() end
+        if f then f:write(theme().name); f:close() end
     end)
 end
 
 local function loadTheme()
-    local ok, v = pcall(function()
+    local ok, s = pcall(function()
         local f = io.open('theme.txt', 'r')
         if not f then return nil end
-        local s = f:read('*a'); f:close()
-        return tonumber(s)
+        local v = f:read('*a'); f:close()
+        return v
     end)
-    if ok and v and THEMES[v] then state.theme = v end
+    if not ok or not s then return end
+    s = tostring(s):match('^%s*(.-)%s*$')
+    local n = tonumber(s)
+    if n and THEMES[n] then state.theme = n; return end
+    for i = 1, #THEMES do
+        if THEMES[i].name == s then state.theme = i; return end
+    end
 end
 
 local themeStack = { cols = 0, vars = 0 }
@@ -543,30 +633,37 @@ local function pushTheme()
                 themeStack.cols = themeStack.cols + 1
             end
         end
-        pc('WindowBg',       { 0.035, 0.035, 0.045 }, 0.97)
-        pc('ChildBg',        { 0.050, 0.050, 0.060 })
-        pc('PopupBg',        { 0.050, 0.050, 0.060 }, 0.98)
-        pc('Border',         P, 0.42)
-        pc('Text',           { 0.91, 0.91, 0.88 })
-        pc('TextDisabled',   { 0.46, 0.46, 0.45 })
-        pc('TitleBg',        { 0.07, 0.07, 0.08 })
-        pc('TitleBgActive',  mul(P, 0.30))
-        pc('FrameBg',        { 0.10, 0.10, 0.12 })
-        pc('FrameBgHovered', mul(P, 0.22))
-        pc('FrameBgActive',  mul(P, 0.32))
-        pc('Button',         { 0.12, 0.12, 0.14 })
-        pc('ButtonHovered',  mul(P, 0.34))
-        pc('ButtonActive',   mul(P, 0.58))
-        pc('CheckMark',      P)
-        pc('SliderGrab',     mul(P, 0.85))
-        pc('Separator',      P, 0.26)
-        pc('Tab',            { 0.10, 0.10, 0.12 })
-        pc('TabHovered',     mul(P, 0.34))
-        pc('TabActive',      mul(P, 0.48))
-        pc('Header',         mul(P, 0.20))
-        pc('HeaderHovered',  mul(P, 0.34))
-        pc('ScrollbarBg',    { 0.05, 0.05, 0.06 })
-        pc('ScrollbarGrab',  mul(P, 0.28))
+        local th, TXT = theme(), txtCol()
+        pc('WindowBg',             surf(0.000), 0.97)
+        pc('ChildBg',              surf(0.030))
+        pc('PopupBg',              surf(0.040), 0.98)
+        pc('Border',               P, 0.45)
+        pc('Text',                 TXT)
+        pc('TextDisabled',         mix(TXT, th.bg, 0.55))
+        pc('TextSelectedBg',       P, 0.35)
+        pc('TitleBg',              surf(0.015))
+        pc('TitleBgActive',        surf(0.050, 0.32))
+        pc('FrameBg',              surf(0.065))
+        pc('FrameBgHovered',       surf(0.090, 0.24))
+        pc('FrameBgActive',        surf(0.130, 0.34))
+        pc('Button',               surf(0.085))
+        pc('ButtonHovered',        surf(0.110, 0.36))
+        pc('ButtonActive',         surf(0.150, 0.58))
+        pc('CheckMark',            P)
+        pc('SliderGrab',           mul(P, 0.85))
+        pc('SliderGrabActive',     P)
+        pc('Separator',            P, 0.28)
+        pc('SeparatorHovered',     P, 0.60)
+        pc('Tab',                  surf(0.055))
+        pc('TabHovered',           surf(0.100, 0.36))
+        pc('TabActive',            surf(0.130, 0.50))
+        pc('Header',               surf(0.060, 0.22))
+        pc('HeaderHovered',        surf(0.100, 0.36))
+        pc('HeaderActive',         surf(0.140, 0.48))
+        pc('ScrollbarBg',          surf(0.012))
+        pc('ScrollbarGrab',        surf(0.080, 0.30))
+        pc('ScrollbarGrabHovered', surf(0.120, 0.45))
+        pc('NavHighlight',         P, 0.50)
     end
     if caps.stylevar then
         local function pv(name, x, y)
@@ -582,8 +679,17 @@ local function pushTheme()
         pv('WindowBorderSize', 1.0); pv('FrameBorderSize', 1.0)
         pv('FramePadding', 7.0, 4.0); pv('ItemSpacing', 8.0, 6.0)
     end
-    COL.accent = { P[1], P[2], P[3], 1.0 }
-    COL.cyan   = { S[1], S[2], S[3], 1.0 }
+    -- COL is what every textc() call in the file reads, so it is rebuilt from
+    -- the live palette here rather than staying the fixed set it was before.
+    -- dim is tinted toward the base so grey text sits IN the window instead of
+    -- floating on it, and the semantic colours are darkened on a light palette
+    -- because full-saturation green on near-white cannot be read.
+    local TXT = txtCol()
+    local function sem(c) return rgba(theme().light and mul(c, 0.58) or c) end
+    COL.accent = rgba(P)
+    COL.cyan   = rgba(S)
+    COL.dim    = rgba(mix(TXT, theme().bg, 0.42))
+    COL.ok, COL.warn, COL.bad = sem(SEM.ok), sem(SEM.warn), sem(SEM.bad)
 end
 
 local function popTheme()
@@ -611,7 +717,8 @@ local function bar(label, r, g, b, h)
     pc('Button',        r, g, b, 1.0)
     pc('ButtonHovered', r, g, b, 1.0)
     pc('ButtonActive',  r, g, b, 1.0)
-    pc('Text',          0.03, 0.03, 0.04, 1.0)
+    local ink = onCol({ r, g, b })
+    pc('Text',          ink[1], ink[2], ink[3], 1.0)
     pcall(function() ImGui.Button(label, -1, h or 26) end)
     if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
 end
@@ -626,8 +733,6 @@ end
 -- on this build the whole thing is marked unavailable for the session and the
 -- flat bar takes over, so a half-drawn banner is impossible.
 -- ---------------------------------------------------------------------------
-local DRK = 0xFF0C0A0A  -- banner colours now come from the active palette
-
 local function drawnBanner()
     if state.fancy == false then return false end
     if not (caps.GetWindowDrawList and caps.GetCursorScreenPos
@@ -638,13 +743,39 @@ local function drawnBanner()
         local x, y = ImGui.GetCursorScreenPos()
         local w    = ImGui.GetContentRegionAvail()
         local dl   = ImGui.GetWindowDrawList()
+        local th = theme()
         local h, cut = 44, 22
-        local YEL, CYN, DIM = pack(A()), pack(B()), pack(B(), 0.20)
+        local P, S = A(), B()
+        local YEL, CYN, DIM = pack(P), pack(S), pack(S, 0.20)
+        local INK = pack(onCol(P))
         local barW = math.max(210, w * 0.62)
 
-        -- solid block with a slant off its right edge
-        dl:AddRectFilled(x, y, x + barW, y + h, YEL)
+        -- The accent block, graded dark-to-light across its width instead of
+        -- being one flat fill, which was the flattest thing in the window.
+        -- AddRectFilledMultiColor would do this in a single call but is not
+        -- bound on every CET build, so it is banded by hand out of
+        -- AddRectFilled, which this file has already proven exists here.
+        local bands = 16
+        for i = 0, bands - 1 do
+            local t0 = i / bands
+            dl:AddRectFilled(x + barW * t0, y,
+                x + barW * ((i + 1) / bands) + 1, y + h,
+                pack(mix(mul(P, 0.68), P, t0)))
+        end
         dl:AddTriangleFilled(x + barW, y, x + barW + cut, y, x + barW, y + h, YEL)
+        -- a lit hairline along the top edge, the way a panel catches a light
+        dl:AddRectFilled(x, y, x + barW + cut, y + 2, pack(mix(P, { 1, 1, 1 }, 0.45)))
+
+        -- Scanlines across the block: one dark line every third row at very low
+        -- alpha. Close up it is texture, at a glance it is a CRT. The line
+        -- shortens as it descends so it follows the slant instead of
+        -- overhanging it.
+        local sy = y + 3
+        while sy < y + h - 1 do
+            dl:AddLine(x, sy, x + barW + cut * ((y + h - sy) / h), sy,
+                pack({ 0, 0, 0 }, 0.10), 1.0)
+            sy = sy + 3
+        end
 
         -- hazard stripes filling the gap to the right of the slant
         local sx = x + barW + cut + 6
@@ -657,9 +788,14 @@ local function drawnBanner()
         dl:AddRectFilled(x, y + h + 3, x + w, y + h + 5, CYN)
         dl:AddRectFilled(x, y + h + 3, x + 46, y + h + 5, YEL)
 
-        -- title sits on the yellow, so it is drawn dark
-        dl:AddText(x + 16, y + 13, DRK, 'M I K O S H I')
+        -- The title sits on the accent block, so its colour is whichever of
+        -- black or white survives there, not black on principle.
+        dl:AddText(x + 16, y + 13, INK, 'M I K O S H I')
         dl:AddText(x + barW + cut + 14, y + 13, CYN, 'NIGHT CITY TOOLKIT')
+        -- the live palette, named on screen rather than only in Diagnostics
+        local tw = (ImGui.CalcTextSize and select(1, ImGui.CalcTextSize(th.name)))
+                   or (#th.name * 7)
+        dl:AddText(x + w - tw - 4, y + h - 15, pack(S, 0.55), th.name)
 
         ImGui.Dummy(w, h + 10)
     end)
@@ -879,6 +1015,19 @@ local function readWatch()
     return out
 end
 
+-- One click to put a fact on the pinned card. Typing its name into
+-- Diagnostics was the only way to add one before, which meant the watch list
+-- worked only for someone who already knew the fact names: exactly the person
+-- who does not need a diagnostic tool. Every fact the menu knows about can now
+-- be sent to the card from the row it sits on.
+local function watchButton(id, fact)
+    if ImGui.Button(ic('Pulse') .. 'Watch##w' .. id) then
+        local ok, msg = addWatch(fact)
+        note((ok and 'OK  ' or 'FAIL ') .. msg)
+    end
+    hint('Puts ' .. fact .. ' on the pinned card, so you can watch it while you play. Press your Mikoshi key with the overlay closed to see the card.')
+end
+
 local function tabQuestFixes()
     textc(COL.dim, 'Track the broken quest in your journal, then use the tools below.')
     sep()
@@ -903,6 +1052,7 @@ local function tabQuestFixes()
 
     section('known fact fixes', 'Wrench')
     textc(COL.dim, 'Read before write. A fix already applied on this save cannot be pressed again.')
+    textc(COL.dim, ic('Pulse') .. 'Watch puts a fact on the pinned card: press your Mikoshi key with the overlay closed, play, and see whether the game sets it on its own.')
     for i, f in ipairs(data.facts or {}) do
         -- Read the fact first. If it already holds the value this fix writes,
         -- the fix is a no-op on this save, so the button is replaced by a note
@@ -932,8 +1082,13 @@ local function tabQuestFixes()
             if ImGui.Button('Read##fact' .. i) then
                 note('%s = %s', f.fact, readOk and tostring(cur) or 'read failed')
             end
+            same(); watchButton('f' .. i, f.fact)
         else
-            textc(COL.bad, 'SetFactStr unavailable on this build')
+            textc(COL.bad, 'SetFactStr unavailable on this build, so this one cannot be written')
+            -- Watching still works without write access, and read-only is the
+            -- case where watching matters most: it is the only way left to see
+            -- whether the game is setting the fact on its own.
+            watchButton('f' .. i, f.fact)
         end
     end
     sep()
@@ -1554,6 +1709,77 @@ local function tabBrowse()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- The palette picker, as chips instead of a row of grey buttons with faction
+-- names on them. You could not see what a palette looked like until you were
+-- already in it.
+--
+-- Each chip IS a Button with its fill pushed to that palette's own base, so
+-- hover and click come free and the chip shows the body colour you are about
+-- to get; the accent and secondary are painted across the bottom with the draw
+-- list afterwards, using the button's own rectangle.
+-- ---------------------------------------------------------------------------
+local function paletteChip(i, w, h)
+    local th = THEMES[i]
+    local on = (state.theme == i)
+    local pushed = 0
+    local function pc(n, c, al)
+        local idx
+        if not pcall(function() idx = ImGuiCol[n] end) or idx == nil then return end
+        if pcall(function() ImGui.PushStyleColor(idx, c[1], c[2], c[3], al or 1.0) end) then
+            pushed = pushed + 1
+        end
+    end
+    pc('Button',        th.bg)
+    pc('ButtonHovered', mix(th.bg, th.a, 0.22))
+    pc('ButtonActive',  mix(th.bg, th.a, 0.40))
+    pc('Border',        th.a, on and 1.0 or 0.35)
+    local clicked = ImGui.Button('##pal' .. i, w, h)
+    if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
+
+    pcall(function()
+        local x1, y1 = ImGui.GetItemRectMin()
+        local x2, y2 = ImGui.GetItemRectMax()
+        local dl = ImGui.GetWindowDrawList()
+        -- accent and secondary as a strip along the bottom edge
+        local split = x1 + (x2 - x1) * 0.62
+        dl:AddRectFilled(x1, y2 - 9, split, y2, pack(th.a))
+        dl:AddRectFilled(split, y2 - 9, x2, y2, pack(th.b))
+        -- the name in whichever of black or white survives on that base
+        dl:AddText(x1 + 7, y1 + 6, pack(onCol(th.bg)), th.name)
+        if on then
+            -- Corner brackets, so the live palette is marked by SHAPE. A
+            -- coloured marker would be the one thing the palette just changed.
+            local b, t, c = 10, 2, pack(th.a)
+            dl:AddRectFilled(x1, y1, x1 + b, y1 + t, c)
+            dl:AddRectFilled(x1, y1, x1 + t, y1 + b, c)
+            dl:AddRectFilled(x2 - b, y1, x2, y1 + t, c)
+            dl:AddRectFilled(x2 - t, y1, x2, y1 + b, c)
+        end
+    end)
+    return clicked
+end
+
+local function paletteGrid()
+    local plain = not (state.fancy ~= false and caps.style and caps.GetWindowDrawList
+                   and caps.GetItemRectMin and caps.GetItemRectMax)
+    for i = 1, #THEMES do
+        if i > 1 and (i % 3) ~= 1 then same() end
+        local hit
+        if plain then
+            if state.theme == i then statusIcon('ok'); same() end
+            hit = ImGui.Button(THEMES[i].name .. '##th' .. i)
+        else
+            hit = paletteChip(i, 136, 46)
+        end
+        if hit then
+            state.theme = i; saveTheme()
+            note('palette: %s. %s', THEMES[i].name, THEMES[i].note or '')
+        end
+    end
+    textc(COL.cyan, theme().note or '')
+end
+
 local function tabDiagnostics()
     section('watch list', 'Pulse')
     wrapped('These appear on the pinned card, live, while you play. Pin the facts a quest should be setting, go do the thing, and watch which one never moves.')
@@ -1587,17 +1813,9 @@ local function tabDiagnostics()
     sep()
 
     section('appearance', 'Palette')
-    textc(COL.dim, 'Palette. Everything in the window is derived from these two colours.')
-    for i = 1, #THEMES do
-        if i > 1 and (i % 3) ~= 1 then same() end
-        local on = (state.theme == i)
-        if on then statusIcon('ok'); same() end
-        if ImGui.Button(THEMES[i].name .. '##th' .. i) then
-            state.theme = i; saveTheme()
-            note('palette: %s', THEMES[i].name)
-        end
-    end
-    textc(COL.dim, 'Saved beside the mod, so it survives a reload.')
+    wrapped('A palette sets the whole window, not just the accent: the base, the panels, the buttons, the greys and the status colours are all derived from the three colours on the chip. The strip along the bottom of each chip is its accent and secondary; the body of the chip is the base you get.')
+    paletteGrid()
+    textc(COL.dim, ic('ContentSave') .. 'Saved by name beside the mod, so it survives a reload.')
     sep()
 
     textc(state.fancy == false and COL.warn or COL.ok,
@@ -1776,6 +1994,22 @@ registerForEvent('onDraw', function()
         -- to be a few lines opened at a quarter of the screen.
         -- AlwaysAutoResize then shrinks it to exactly its contents.
         if ImGui.Begin('MIKOSHI WATCH##card', ImGuiWindowFlags.AlwaysAutoResize) then
+            -- One accent rule, so the card belongs to the palette rather than
+            -- looking like a stray tooltip.
+            --
+            -- Deliberately NOT accentRule(), which spans the content width and
+            -- advances the cursor by that width. In an AlwaysAutoResize window
+            -- the content decides the width, so a full-width rule would set the
+            -- card's width from whatever ImGui guessed on the first frame and
+            -- then hold it there. This one is a fixed 150px and advances by a
+            -- single pixel, so the rows alone decide how wide the card is.
+            pcall(function()
+                local rx, ry = ImGui.GetCursorScreenPos()
+                local rdl = ImGui.GetWindowDrawList()
+                rdl:AddRectFilled(rx, ry + 2, rx + 150, ry + 3, pack(B(), 0.45))
+                rdl:AddRectFilled(rx, ry + 2, rx + 26, ry + 3, pack(A()))
+                ImGui.Dummy(1, 6)
+            end)
             local rows = readWatch()
             if #rows == 0 then
                 textc(COL.dim, ic('Pulse') .. 'nothing watched')

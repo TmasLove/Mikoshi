@@ -77,11 +77,11 @@ behaviour in a tool whose job is to tell you whether a fix worked.
 - **Browse** — reads clothing, weapons and vehicles out of the running game
   (2074 / 1828 / 1379 records here), with search, readable names, quality
   colours and a filter for what V can actually obtain.
-- **Diagnostics** — what this build exposes, palette picker, manual record and
-  fact checks.
+- **Diagnostics** — what this build exposes, the palette picker, manual record
+  and fact checks.
 - **Undo** — every fact write with its previous value.
 
-![Six palettes](docs/palettes.png)
+![Nine palettes](docs/palettes.png)
 
 ## What is deliberately not here
 
