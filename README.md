@@ -1,3 +1,5 @@
+<img src="docs/banner.png" alt="Daemon, a Night City toolkit for Cyberpunk 2077">
+
 # Daemon
 
 A Cyber Engine Tweaks mod menu for Cyberpunk 2077, built for game **2.5** and
@@ -6,6 +8,8 @@ record the running game will admit to.
 
 Folder name is `fixer` and the display name is Daemon. The folder stays as it is
 so an existing hotkey binding survives a rename.
+
+![Quest Fixes and the cyberpsycho checklist](docs/screenshot-quest-fixes.png)
 
 ## Install
 

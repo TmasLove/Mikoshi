@@ -5,3 +5,6 @@ probe_touch.txt
 # Windows cruft
 Thumbs.db
 desktop.ini
+
+# Release staging; the zip is rebuilt from fixer/
+dist/stage/
