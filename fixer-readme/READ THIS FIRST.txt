@@ -70,10 +70,11 @@ until you set one.
 
 WHAT YOUR KEY ACTUALLY DOES
 ---------------------------
-It pins a live watch card on screen with the overlay closed. The card shows
-the hash of the quest you are tracking, your coordinates, and the current
-value of any quest facts you added to the watch list in Diagnostics. A value
-that changes is highlighted for six seconds.
+It pins a small live card on screen with the overlay closed, showing the
+current value of any quest facts you added to the watch list in Diagnostics.
+A value that changes is highlighted for six seconds. The card sizes itself to
+whatever it is showing, so an empty watch list is one line. Your coordinates
+can be added to it with a checkbox next to the watch list.
 
 That is the point of it: pin the facts a quest should be setting, go do the
 thing the quest wants, and watch which one never moves. The card is read-only.
