@@ -1,0 +1,318 @@
+<title>Fixer Mod Menu</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Single dark world on purpose: this depicts a HUD overlay inside the game.
+   Layout: sidebar nav on the left, rows on the right, status strip beneath. */
+:root{
+  color-scheme:dark;
+  --void:#07070a; --panel:#0d0e12; --nav:#0a0b0e; --raised:#15171d; --line:#22252d;
+  --yellow:#fcee0a; --cyan:#19e0f2; --red:#ff2e4d; --green:#4fe08a;
+  --fg:#e8e9e4; --dim:#868a93;
+  --ui:"Chakra Petch",system-ui,-apple-system,Segoe UI,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+body{background:var(--void);color:var(--fg);font-family:var(--ui);line-height:1.45;
+  background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.014) 0 1px,transparent 1px 3px)}
+.wrap{max-width:900px;margin:0 auto;padding-block:32px 72px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px))}
+.eyebrow{font-family:var(--mono);font-size:.7rem;letter-spacing:.22em;color:var(--yellow);margin:0 0 6px}
+h1{font-size:clamp(1.8rem,1.3rem+2.4vw,2.6rem);font-weight:700;margin:0;text-transform:uppercase;text-wrap:balance}
+h1 span{color:var(--yellow)}
+.lede{color:var(--dim);margin:10px 0 0;max-width:60ch}
+h2{font-family:var(--mono);font-size:.74rem;letter-spacing:.2em;color:var(--yellow);
+  margin:40px 0 12px;text-transform:uppercase;font-weight:500}
+h2::before{content:"// "}
+
+/* ---------------- the menu ---------------- */
+.menu{margin-top:26px;background:var(--panel);border:1px solid var(--line);
+  box-shadow:0 0 0 1px rgba(252,238,10,.13),0 24px 58px rgba(0,0,0,.6);min-width:0}
+.menu-title{background:var(--yellow);color:#07070a;padding:6px 14px;display:flex;gap:10px;align-items:center;
+  font-weight:700;letter-spacing:.16em;font-size:.78rem;text-transform:uppercase}
+.menu-title .r{margin-left:auto;font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;opacity:.75}
+.menu-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;
+  padding:9px 14px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.7rem}
+.menu-head .v{color:var(--yellow);font-weight:500;letter-spacing:.08em}
+.menu-head .s{color:var(--dim)}
+.menu-head .s b{color:var(--green);font-weight:400}
+.menu-body{display:grid;grid-template-columns:186px minmax(0,1fr);min-height:420px}
+.menu-nav{background:var(--nav);border-right:1px solid var(--line);padding:8px;display:flex;flex-direction:column;gap:2px}
+.nav-btn{display:flex;align-items:center;gap:8px;width:100%;font:inherit;font-size:.76rem;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:transparent;
+  border:1px solid transparent;border-left:2px solid transparent;padding:8px 9px;cursor:pointer;text-align:left}
+.nav-btn:hover{color:var(--fg);background:var(--raised)}
+.nav-btn[aria-current="true"]{background:var(--yellow);color:#07070a;border-left-color:#07070a}
+.nav-btn .n{margin-left:auto;font-family:var(--mono);font-size:.66rem;opacity:.72}
+.nav-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+.menu-pane{padding:14px 15px 16px;display:grid;gap:13px;align-content:start;min-width:0}
+.menu-foot{border-top:1px solid var(--line);padding:7px 14px;font-family:var(--mono);
+  font-size:.68rem;color:var(--dim);display:flex;gap:8px;align-items:center}
+.menu-foot::before{content:"";width:6px;height:6px;background:var(--green);flex:0 0 auto}
+
+.sec{font-family:var(--mono);font-size:.66rem;letter-spacing:.2em;color:var(--yellow);text-transform:uppercase}
+.sec::before{content:"// "}
+.row{display:grid;gap:4px;padding-bottom:12px;border-bottom:1px solid var(--line);min-width:0}
+.row:last-child{border-bottom:0;padding-bottom:0}
+.rowhead{display:flex;flex-wrap:wrap;gap:7px;align-items:baseline}
+.name{font-weight:600;font-size:.92rem}
+.badge{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;
+  padding:1px 6px;border:1px solid currentColor;white-space:nowrap}
+.b-ok{color:var(--green)}.b-warn{color:var(--yellow)}.b-bad{color:var(--red)}.b-dim{color:var(--dim)}
+.note{color:var(--dim);font-size:.8rem;max-width:62ch}
+.ctl{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:3px}
+.btn{font:inherit;font-size:.74rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--raised);color:var(--fg);border:1px solid var(--line);padding:4px 11px;cursor:default}
+.btn.hot{background:transparent;border-color:rgba(252,238,10,.5);color:var(--yellow)}
+.btn.off{color:#5a5e68;border-style:dashed}
+.num{font-family:var(--mono);font-size:.74rem;background:#08090c;border:1px solid var(--line);
+  color:var(--fg);padding:4px 9px;min-width:72px;text-align:right}
+.txt{font-family:var(--mono);font-size:.74rem;background:#08090c;border:1px solid var(--line);
+  color:#5a5e68;padding:4px 9px;min-width:110px}
+.cmd{display:flex;gap:7px;margin-top:4px;min-width:0}
+.cmd code{font-family:var(--mono);font-size:.71rem;color:var(--cyan);background:#08090c;
+  border:1px solid var(--line);border-left:2px solid var(--cyan);padding:5px 8px;
+  flex:1;min-width:0;overflow-x:auto;white-space:pre}
+.copy{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;
+  background:transparent;color:var(--yellow);border:1px solid rgba(252,238,10,.42);
+  padding:5px 9px;cursor:pointer;flex:0 0 auto}
+.copy:hover{background:rgba(252,238,10,.11)}
+.copy:focus-visible{outline:2px solid var(--cyan);outline-offset:1px}
+.kv{font-family:var(--mono);font-size:.74rem;display:grid;gap:3px}
+.kv span{color:var(--dim)}.kv b{color:var(--green);font-weight:400}
+
+.card{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--yellow);
+  padding:15px 17px;min-width:0}
+.card p{margin:0 0 9px;max-width:66ch;color:#cfd2cd}.card p:last-child{margin:0}
+.card code{font-family:var(--mono);font-size:.82em;color:var(--cyan);word-break:break-word}
+.card.alert{border-left-color:var(--red)}
+ol{padding-left:19px;margin:0}ol li{margin-bottom:8px;max-width:64ch;color:#cfd2cd}
+ol li b{color:var(--fg)}
+/* Narrow layout. The sidebar stacks earlier, because at 600px a 186px rail
+   leaves the content pane too thin to read a command in. Fields lose their
+   fixed minimums and share the row instead, and the copy button drops below
+   the code so the code itself gets the full width. */
+@media(max-width:680px){
+  .menu-body{grid-template-columns:1fr}
+  .menu-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;
+    border-right:0;border-bottom:1px solid var(--line)}
+  .nav-btn{width:100%;padding:9px 10px}
+  .cmd{flex-direction:column;align-items:stretch;gap:5px}
+  .copy{align-self:flex-start}
+  .txt,.num{flex:1 1 90px;min-width:0;width:auto}
+  .ctl{gap:6px}
+  .menu-head{gap:4px 10px}
+}
+@media(max-width:420px){
+  .nav-btn{padding:8px 7px;font-size:.7rem}
+  .btn{flex:1 1 auto;text-align:center}
+  .wrap{padding-block:24px 48px}
+}
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Cyber Engine Tweaks · game 2.5 · CET 1.38.1</p>
+  <h1>Daemon <span>//</span> command reference</h1>
+  <p class="lede">A reference for every command in the mod, with the exact Lua behind each one. Read it on a phone or second screen while you play. Nothing here touches the game.</p>
+  <p class="lede" style="color:var(--red);font-size:.9rem">This is not a picture of the overlay. The real menu is drawn by ImGui, which has one font at one size and its own button shapes, so it looks plainer than this. The commands, categories and counts are accurate; the styling is not.</p>
+
+  <div class="menu">
+    <div class="menu-title"><span>Fixer</span><span class="r">night city toolkit</span></div>
+    <div class="menu-head">
+      <span class="v">FIXER v1.0</span>
+      <span class="s">game <b>2.5</b></span><span class="s">CET <b>1.38.1</b></span>
+      <span class="s"><b>27</b>/31 ids verified</span><span class="s"><b>5281</b> records browsable</span>
+    </div>
+    <div class="menu-body">
+      <nav class="menu-nav" id="nav"></nav>
+      <div class="menu-pane" id="pane"></div>
+    </div>
+    <div class="menu-foot" id="foot">ready</div>
+  </div>
+
+  <h2>Why some rows are greyed</h2>
+  <div class="card alert">
+    <p><b>verified</b> means the game returned a record for that ID at load. <b>not on this build</b> means it did not, and the button is disabled rather than firing into nothing.</p>
+    <p>Existing still does not mean correct. <code>Items.ma_wat_lch_06_onscreen_01</code> resolves and reads fine, but the list calling it "Where the Bodies Hit the Floor" had the wrong district. The two real shards are under <code>wat_nid_03</code>, one named <code>go_clean_after_elly</code>, which guessing from the title would never reach.</p>
+  </div>
+
+  <h2>Fixed after checking the official wiki</h2>
+  <div class="card">
+    <ol>
+      <li><b>Ammo was under the wrong prefix.</b> Shipped as <code>Items.HandgunAmmo</code>, actually <code>Ammo.HandgunAmmo</code>. All five rows would have loaded greyed out.</li>
+      <li><b>The unstuck teleport used a deprecated call.</b> Now routed through the teleportation facility with a real Vector4.</li>
+      <li><b>Perk and attribute points were renamed at patch 2.0.</b> <code>Game.GiveDevPoints</code> and <code>Game.SetAttribute</code> are gone; this uses the current PlayerDevelopmentSystem route.</li>
+      <li><b>Street cred through Game.SetLevel is undocumented</b>, so the button was removed rather than left looking official.</li>
+    </ol>
+  </div>
+
+  <h2>What was taken out, and why</h2>
+  <div class="card alert">
+    <ol>
+      <li><b>Force complete the tracked quest.</b> It wrote a journal state with no previous value to restore, and the enum names did not resolve on this build, so it fell back to hard-coded numbers. A wrong number there is a permanently wrong quest.</li>
+      <li><b>Story facts.</b> Johnny's relationship level, Skippy's mode, the Takemura flag. Undoing the fact does not undo what the story already did because of it.</li>
+      <li><b>Teleport is gated, not removed.</b> Several destinations cannot be left on foot, so the known-place buttons stay disabled until a waypoint exists to return to.</li>
+      <li><b>Nothing beneficial was removed.</b> Eddies, points, ammo, components, medkits, levels, attributes, vehicles and the browser are all intact.</li>
+    </ol>
+  </div>
+
+  <h2>Still open</h2>
+  <div class="card">
+    <p><b>F2 is unbound.</b> CET forbids mods from shipping default keys. Overlay, Bindings, "Fixer: show menu", press F2, Save.</p>
+    <p><b>Weather names are unverified.</b> The official wiki documents no weather commands, so those eight strings stay community guesses. The system call is probed; the names are not.</p>
+  </div>
+</div>
+
+<script>
+const G=(id,q)=>'Game.AddToInventory("'+id+'", '+q+')';
+const F=(f,v)=>'Game.GetQuestsSystem():SetFactStr("'+f+'", '+v+')';
+const item=(n,id,q,b,note)=>({name:n,badge:b||['b-warn','unverified'],note:note,
+  ctl:[{t:'num',v:String(q)},{t:'btn',label:'−'},{t:'btn',label:'+'},{t:'btn',label:'Give',hot:1}],cmd:G(id,q)});
+
+const CATS=[
+ {name:'Quest Fixes',n:22,rows:[
+  {kind:'kv',lines:[['tracked quest','resolved by walking 2 parent(s)'],['hash','18446744073709551615']]},
+  {name:'Unstick phone calls',badge:['b-warn','community'],
+   ctl:[{t:'btn',label:'Apply',hot:1},{t:'btn',label:'Read'}],cmd:F('ig_phone_manager_off',0)},
+  {name:'Skippy: trigger "Machine Gun"',badge:['b-warn','community'],
+   ctl:[{t:'btn',label:'Apply',hot:1},{t:'btn',label:'Read'}],cmd:F('mq007_skippy_goes_emo',1)},
+  {name:'Letter of the Law: mark email read',badge:['b-warn','community'],
+   ctl:[{t:'btn',label:'Apply',hot:1},{t:'btn',label:'Read'}],cmd:F('ma_hey_spr_06_mail_read',1)},
+  {name:'Fixer tier unlock',badge:['b-dim','template'],
+   ctl:[{t:'txt',label:'district'},{t:'txt',label:'n'},{t:'btn',label:'Apply',off:1}],cmd:F('sts_wat_kab_tier_2',1)},
+  {kind:'sec',t:'cyberpsycho sightings'},
+  {name:'All 17, with district',badge:['b-ok','ids from the modding wiki'],
+   note:'Press Check all and the mod reads each quest's facts. A sighting that answers with nothing is the one left.',
+   ctl:[{t:'btn',label:'Check all 17',hot:1},{t:'btn',label:'Clear'}],
+   cmd:'Game.GetQuestsSystem():GetFactStr("ma_wat_nid_03")'},
+  {kind:'sec',t:'templates'},
+  {name:'Gig counter sync',badge:['b-dim','template'],
+   ctl:[{t:'txt',label:'gig'},{t:'btn',label:'Apply',off:1}],cmd:F('ina_05_finished',1)}]},
+
+ {name:'Shards',n:8,intro:'Granting a shard is not reading it. Open it in the journal afterwards.',rows:[
+  item('Where the Bodies Hit the Floor: Brick and Ellis','Items.ma_wat_nid_03_brick_and_elly_conversation',1,['b-ok','confirmed']),
+  item('Where the Bodies Hit the Floor: Hoof and Sanders','Items.ma_wat_nid_03_go_clean_after_elly',1,['b-ok','confirmed'],'The ID does not resemble the shard title at all.'),
+  item('Lt. Mower','Items.ma_wat_kab_08_onscreen_01',1),
+  item('Demons of War (Matt Liaw)','Items.ma_wat_kab_02_onscreen_01',1),
+  item('Six Feet Under (Lely Hein)','Items.ma_wbr_hil_01_onscreen_01',1),
+  item('Blood Ritual','Items.ma_wat_nid_01_onscreen_01',1),
+  item('Discount Doc (Chase Coley)','Items.ma_std_rcr_11_onscreen_01',1),
+  item('Unidentified, from the community list','Items.ma_wat_lch_06_onscreen_01',1,['b-dim','quest unknown'],
+   'Reads in game but belongs to some other quest. Kept so the ID is not lost.')]},
+
+ {name:'Inventory',n:18,rows:[
+  {kind:'sec',t:'eddies and points'},
+  item('Eddies','Items.money',10000,['b-ok','verified']),
+  item('Perk point skillbook','Items.PerkPointSkillbook',5,['b-ok','verified']),
+  item('Attribute point skillbook','Items.AttributePointSkillbook',1),
+  item('Relic points','Items.RelicPointSkillbook',1,null,'Phantom Liberty only.'),
+  {kind:'sec',t:'experience'},
+  {name:'Street Cred',badge:['b-dim','function, not a record'],
+   ctl:[{t:'num',v:'1000'},{t:'btn',label:'Add',hot:1}],cmd:'Game.AddExp("StreetCred", 1000)'},
+  {kind:'sec',t:'ammo  ·  corrected prefix'},
+  item('Handgun ammo','Ammo.HandgunAmmo',500),
+  item('Rifle ammo','Ammo.RifleAmmo',700),
+  item('Shotgun shells','Ammo.ShotgunAmmo',100),
+  item('Sniper rounds','Ammo.SniperRifleAmmo',100),
+  {kind:'sec',t:'consumables'},
+  item('Medkit, rare','Items.FirstAidWhiteThree',10),
+  item('MaxDoc, rare','Items.CPO_MaxDoc',10),
+  {kind:'sec',t:'crafting'},
+  item('Legendary components','Items.LegendaryMaterial1',100),
+  item('Quickhack, legendary','Items.QuickHackLegendaryMaterial1',100)]},
+
+ {name:'World',n:4,intro:'Function calls, so they are probed against the Game object at load rather than against TweakDB.',rows:[
+  {kind:'sec',t:'time of day'},
+  {name:'Set the hour',badge:['b-ok','system present'],
+   ctl:[{t:'num',v:'12'},{t:'btn',label:'−'},{t:'btn',label:'+'},{t:'btn',label:'Set 12:00',hot:1}],
+   cmd:'Game.GetTimeSystem():SetGameTimeByHMS(12, 0, 0)'},
+  {kind:'sec',t:'weather'},
+  {name:'Eight states',badge:['b-warn','names unverified'],
+   note:'The official wiki documents no weather commands. The system is probed; these strings are not.',
+   ctl:[{t:'btn',label:'Sunny',hot:1},{t:'btn',label:'Cloudy'},{t:'btn',label:'Rain'},
+        {t:'btn',label:'Toxic rain'},{t:'btn',label:'Fog'},{t:'btn',label:'Sandstorm'}],
+   cmd:'Game.GetWeatherSystem():SetWeather("24h_weather_rain", 10.0, 0)'},
+  {kind:'sec',t:'stuck in the world'},
+  {name:'Nudge V upward',badge:['b-ok','current call'],
+   note:'Two metres straight up, for falling through geometry. Uses the teleportation facility, not the deprecated helper.',
+   ctl:[{t:'btn',label:'Nudge V upward',hot:1}],
+   cmd:'local p = Game.GetPlayer():GetWorldPosition()\nGame.GetTeleportationFacility():Teleport(pl,\n  ToVector4{x=p.x, y=p.y, z=p.z+2.0, w=1},\n  ToEulerAngles{roll=0, pitch=0, yaw=0})'},
+  {kind:'sec',t:'perk and attribute points'},
+  {name:'Current 2.0+ route',badge:['b-ok','renamed call'],
+   note:'Game.GiveDevPoints and Game.SetAttribute were both renamed at patch 2.0.',
+   ctl:[{t:'num',v:'5'},{t:'btn',label:'Perk points',hot:1},{t:'btn',label:'Attribute points',hot:1}],
+   cmd:'PlayerDevelopmentSystem.GetInstance(pl):GetDevelopmentData(pl)\n  :AddDevelopmentPoints(5, gamedataDevelopmentPointType.Primary)'}]},
+
+ {name:'Browse',n:5281,intro:'Read live out of your install, so every id is correct for the patch actually loaded.',rows:[
+  {kind:'sec',t:'source'},
+  {name:'Pick a record type',badge:['b-ok','live from TweakDB'],
+   ctl:[{t:'btn',label:'Clothing 2074',hot:1},{t:'btn',label:'Weapons 1828'},{t:'btn',label:'Vehicles 1379'}],
+   cmd:'TweakDB:GetRecords("gamedataClothing_Record")'},
+  {kind:'sec',t:'search'},
+  {name:'Filter 2074 names',note:'First 40 matches are shown. Type to narrow.',
+   ctl:[{t:'txt',label:'jacket'},{t:'btn',label:'Clear'}],cmd:'name:lower():find(q, 1, true)'},
+  {kind:'sec',t:'results'},
+  {name:'Items.Jacket_02_basic_01',ctl:[{t:'btn',label:'Give',hot:1}],cmd:G('Items.Jacket_02_basic_01',1)},
+  {name:'Items.Jacket_14_rich_02',ctl:[{t:'btn',label:'Give',hot:1}],cmd:G('Items.Jacket_14_rich_02',1)},
+  {name:'Vehicle.v_standard2_archer_hella',badge:['b-ok','vehicle system present'],
+   note:'Vehicles unlock for summoning rather than landing in inventory.',
+   ctl:[{t:'btn',label:'Unlock',hot:1}],
+   cmd:'Game.GetVehicleSystem():EnablePlayerVehicle("Vehicle.v_standard2_archer_hella", true, false)'}]},
+
+ {name:'Diagnostics',rows:[
+  {kind:'kv',lines:[['set fact','QuestsSystem:SetFactStr'],['read fact','QuestsSystem:GetFactStr'],
+   ['journal','all four methods present'],['state enum','gameJournalEntryState.Succeeded'],
+   ['style','ImGuiCol + ImGuiStyleVar present'],['name accessor','GetID().value'],
+   ['vehicle system','EnablePlayerVehicle found']]},
+  {kind:'sec',t:'keybind'},
+  {name:'Fixer: show menu',badge:['b-warn','unbound'],
+   note:'CET does not allow a mod to ship a default key. Bindings tab, click the box, press F2, Save.',
+   ctl:[{t:'txt',label:'unbound'}],cmd:'registerHotkey("fixer_toggle", "Fixer: show menu", fn)'},
+  {kind:'sec',t:'check anything by hand'},
+  {name:'Does this record exist?',note:'The same test that caught the blank shard.',
+   ctl:[{t:'txt',label:'record'},{t:'btn',label:'Check',hot:1}],
+   cmd:'print(TweakDB:GetRecord("Items.ma_wat_nid_03_go_clean_after_elly") ~= nil)'}]},
+
+ {name:'Undo',n:1,intro:'Fact changes only. A forced journal state has no previous value to restore.',rows:[
+  {name:'14:22:07  ig_phone_manager_off',note:'1 → 0',
+   ctl:[{t:'btn',label:'Put it back',hot:1}],cmd:F('ig_phone_manager_off',1)}]}
+];
+
+const navEl=document.getElementById('nav'),paneEl=document.getElementById('pane'),footEl=document.getElementById('foot');
+let active=0;
+const ctlHTML=c=>c.t==='btn'?'<span class="btn'+(c.off?' off':(c.hot?' hot':''))+'">'+c.label+'</span>'
+ :c.t==='num'?'<span class="num">'+c.v+'</span>'
+ :c.t==='txt'?'<span class="txt">'+c.label+'</span>'
+ :c.t==='check'?'<span class="btn off">☐ '+c.label+'</span>':'';
+function rowHTML(r,i){
+  if(r.kind==='sec')return '<div class="sec">'+r.t+'</div>';
+  if(r.kind==='kv')return '<div class="row"><div class="kv">'+
+    r.lines.map(l=>'<div><span>'+l[0]+'</span> <b>'+l[1]+'</b></div>').join('')+'</div></div>';
+  let h='<div class="row"><div class="rowhead"><span class="name">'+r.name+'</span>';
+  if(r.badge)h+='<span class="badge '+r.badge[0]+'">'+r.badge[1]+'</span>';
+  h+='</div>';
+  if(r.note)h+='<div class="note">'+r.note+'</div>';
+  if(r.ctl)h+='<div class="ctl">'+r.ctl.map(ctlHTML).join('')+'</div>';
+  if(r.cmd)h+='<div class="cmd"><code id="c'+i+'">'+r.cmd.replace(/</g,'&lt;')+
+    '</code><button class="copy" data-c="c'+i+'">copy</button></div>';
+  return h+'</div>';
+}
+function render(){
+  navEl.innerHTML=CATS.map((c,i)=>'<button class="nav-btn" aria-current="'+(i===active)+'">'+
+    c.name+(c.n?'<span class="n">'+c.n+'</span>':'')+'</button>').join('');
+  const c=CATS[active];
+  paneEl.innerHTML=(c.intro?'<div class="note">'+c.intro+'</div>':'')+c.rows.map(rowHTML).join('');
+  footEl.textContent='TweakDB check: 27 of 31 ids present on this build';
+}
+navEl.addEventListener('click',e=>{const b=e.target.closest('.nav-btn');if(!b)return;
+  active=[...navEl.children].indexOf(b);render();});
+paneEl.addEventListener('click',async e=>{
+  const b=e.target.closest('.copy');if(!b)return;
+  const el=document.getElementById(b.dataset.c);
+  try{await navigator.clipboard.writeText(el.textContent);b.textContent='copied';}
+  catch{const r=document.createRange();r.selectNodeContents(el);
+    const s=getSelection();s.removeAllRanges();s.addRange(r);b.textContent='selected';}
+  setTimeout(()=>{b.textContent='copy';},1400);
+});
+render();
+</script>

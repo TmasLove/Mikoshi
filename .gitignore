@@ -1,0 +1,7 @@
+# Written by the mod beside itself at runtime, not source
+theme.txt
+probe_touch.txt
+
+# Windows cruft
+Thumbs.db
+desktop.ini
