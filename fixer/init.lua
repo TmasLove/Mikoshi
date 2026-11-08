@@ -558,24 +558,6 @@ local function setFactLogged(name, value)
     return true, string.format('%s: %s -> %s', name, tostring(prev), tostring(value))
 end
 
--- Walk to the top of the journal tree instead of assuming a fixed depth. The
--- snippet going round online calls GetParentEntry exactly twice, which is right
--- for a tracked objective and wrong for a tracked sub-objective.
-local function resolveTrackedQuest()
-    if not api.journalOk then return nil, 'journal API unavailable', 0 end
-    local ok, tracked = pcall(function() return api.journal:GetTrackedEntry() end)
-    if not ok or tracked == nil then return nil, 'nothing is being tracked', 0 end
-    local node, depth = tracked, 0
-    while depth < 8 do
-        local ok2, parent = pcall(function() return api.journal:GetParentEntry(node) end)
-        if not ok2 or parent == nil then break end
-        node, depth = parent, depth + 1
-    end
-    return node, nil, depth
-end
-
--- forceCompleteTracked was removed with the button that called it.
-
 -- ---------------------------------------------------------------------------
 -- Identifying a journal entry well enough to block it.
 --
@@ -590,6 +572,10 @@ local ENTRY_KEYS = {
     { 'GetId()',        function(e) return e:GetId() end },
     { 'GetPath()',      function(e) return e:GetPath() end },
     { 'GetEntryHash()', function(e) return api.journal:GetEntryHash(e) end },
+    -- Last resort. A displayed title is localised and is not an id, but it is
+    -- unique enough to block one quest by and it is the one thing a journal
+    -- entry will always give you. Better than a feature that cannot run.
+    { 'GetTitle()',     function(e) return e:GetTitle(api.journal) end },
 }
 
 local function entryKey(e)
@@ -620,6 +606,49 @@ local function entryLabel(e)
     end
     return nil
 end
+
+-- Every node from the tracked entry up to the top, kept rather than walked
+-- past.
+local function trackedChain()
+    if not api.journalOk then return nil, 'journal API unavailable' end
+    local ok, tracked = pcall(function() return api.journal:GetTrackedEntry() end)
+    if not ok or tracked == nil then return nil, 'nothing is being tracked' end
+    local chain, node = { tracked }, tracked
+    for _ = 1, 12 do
+        local ok2, parent = pcall(function() return api.journal:GetParentEntry(node) end)
+        if not ok2 or parent == nil then break end
+        chain[#chain + 1] = parent
+        node = parent
+    end
+    return chain
+end
+
+-- The quest, meaning the outermost node that can still say what it is.
+--
+-- The old version walked until GetParentEntry returned nil and used whatever
+-- it landed on. That is the journal ROOT, not the quest. The root has no id
+-- and hashes to zero, which is exactly why the tracked quest has been
+-- displaying "hash: 0" since the day that line was written, and why Block
+-- could not read an id for it: it was asking a container for its name.
+--
+-- Seven parents deep says the same thing. A quest is not seven levels above
+-- its own objective.
+--
+-- So: take the chain, start at the top, and use the first node that gives a
+-- usable key. The root falls out on its own because it cannot name itself,
+-- and nothing here has to know the class names of a journal tree.
+local function resolveTrackedQuest()
+    local chain, err = trackedChain()
+    if not chain then return nil, err, 0 end
+    for i = #chain, 1, -1 do
+        local key, which = entryKey(chain[i])
+        if key then return chain[i], nil, i - 1, key, which end
+    end
+    return nil, ('nothing in the tracked chain of %d could identify itself'):format(#chain), 0
+end
+
+-- forceCompleteTracked was removed with the button that called it.
+
 
 local function saveBlocked()
     pcall(function()
@@ -679,14 +708,12 @@ local function guardTick(dt)
     local ok, tracked = pcall(function() return api.journal:GetTrackedEntry() end)
     if not ok or tracked == nil then return end
 
-    -- Match on the top-level quest, not on the objective, because the game
-    -- tracks an objective inside the quest and that is a different entry.
-    local node, depth = tracked, 0
-    while depth < 8 do
-        local ok2, parent = pcall(function() return api.journal:GetParentEntry(node) end)
-        if not ok2 or parent == nil then break end
-        node, depth = parent, depth + 1
-    end
+    -- Match on the quest, not on the objective, because the game tracks an
+    -- objective inside the quest and that is a different entry. Same
+    -- resolution the Block button uses, so what you blocked is what is
+    -- matched.
+    local node = resolveTrackedQuest()
+    if node == nil then return end
 
     if not isBlocked(entryKey(node)) then
         -- Whatever you were tracking when nothing was wrong is where focus
@@ -1450,12 +1477,15 @@ local function tabQuestFixes()
     textc(COL.dim, 'Track the broken quest in your journal, then use the tools below.')
     sep()
 
-    local quest, err, depth = resolveTrackedQuest()
+    local quest, err, depth, qkey = resolveTrackedQuest()
     ImGui.Text('Tracked quest')
     if quest then
-        local ok, hash = pcall(function() return api.journal:GetEntryHash(quest) end)
-        textc(COL.ok, string.format('resolved by walking %d parent(s)', depth))
-        ImGui.Text('hash: ' .. (ok and tostring(hash) or 'unavailable'))
+        -- The name and the key it is known by. The hash that used to be
+        -- printed here was the journal root's, and it was always zero.
+        textc(COL.accent, entryLabel(quest) or '(no readable title)')
+        textc(COL.dim, string.format('%d parent(s) up, identified by %s',
+            depth, state.guard.keySrc or '?'))
+        textc(COL.cyan, tostring(qkey))
     else
         textc(COL.warn, err or 'nothing tracked')
     end
@@ -1475,10 +1505,9 @@ local function tabQuestFixes()
             -- wrong in this project. Press it while the quest is tracked and the
             -- game supplies its own name for it.
             if ImGui.Button('Block the quest I am tracking now##guardadd') then
-                local q = resolveTrackedQuest()
-                local key = entryKey(q)
-                if key == nil then
-                    note('FAIL could not read an id for the tracked quest, so it cannot be blocked')
+                local q, qerr, _, key = resolveTrackedQuest()
+                if q == nil or key == nil then
+                    note('FAIL %s', qerr or 'no entry in the tracked chain could identify itself')
                 elseif isBlocked(key) then
                     note('that quest is already blocked')
                 else
