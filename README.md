@@ -11,6 +11,14 @@ so an existing hotkey binding survives a rename.
 
 ![Quest Fixes and the cyberpsycho checklist](docs/screenshot-quest-fixes.png)
 
+## Download
+
+[**Mikoshi-1.0.zip**](dist/Mikoshi-1.0.zip) — 27 KB, unzips straight into your
+Cyberpunk 2077 folder.
+
+Requires [Cyber Engine Tweaks](https://www.nexusmods.com/cyberpunk2077/mods/107)
+1.38.1 or later, on game 2.5.
+
 ## Install
 
 Copy `fixer/` to:
@@ -107,3 +115,9 @@ help the player".
 - `preview.html` — a command reference, readable on a phone while playing. The
   styling is not what the overlay looks like; the commands are accurate.
 - `HANDOFF.md` — the original brief, written before any of this existed.
+
+## Licence
+
+MIT. Do what you like with it, including shipping your own version, as long as
+the copyright notice travels with it. Mods that only use the Cyber Engine
+Tweaks scripting API are not bound by CET's own GPL.
