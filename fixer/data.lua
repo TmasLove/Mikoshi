@@ -23,8 +23,14 @@ return {
     { label = 'Eddies',            record = 'Items.money',                   default = 10000, step = 5000 },
     { label = 'Perk points',       record = 'Items.PerkPointSkillbook',      default = 5,     step = 1, loop = true },
     { label = 'Attribute points',  record = 'Items.AttributePointSkillbook', default = 1,     step = 1, loop = true },
-    { label = 'Relic points',      record = 'Items.RelicPointSkillbook',     default = 1,     step = 1, loop = true,
-      note = 'Phantom Liberty only.' },
+    -- Relic points had a row here pointing at Items.RelicPointSkillbook. That
+    -- record is not on 2.5, and searching TweakDB for it returns only
+    -- q104_relic_blueprints_shard, a quest shard. There is no skillbook to
+    -- grant, so the row is gone rather than left permanently greyed: a dead
+    -- row that can never come back is not a diagnostic, it is clutter that
+    -- makes the verified count look worse than the catalogue actually is.
+    -- Relic points now come from the development system, next to perk and
+    -- attribute points in Inventory.
     { label = 'Carry capacity shard', record = 'Items.CarryCapacityBooster', default = 1,  step = 1, loop = true },
   },
 
@@ -52,12 +58,37 @@ return {
   -- ========================================================================
   -- CONSUMABLES
   -- ========================================================================
+  -- 2026-11-08, read off the live TweakDB rather than off a list.
+  --
+  -- The family is FirstAidWhiff. Whiff, not White. Every medkit id in here was
+  -- a misreading of one letter, which is why all five healing rows were dead
+  -- and why searching TweakDB for "MaxDoc" found nothing at all: MaxDoc is the
+  -- name the game SHOWS you, and FirstAidWhiff is the name it stores. There is
+  -- no way to get from one to the other by thinking about it, which is the
+  -- whole argument for asking the running game instead.
+  --
+  -- Every id below was listed back by the game itself. Which tier each suffix
+  -- maps to on screen is NOT verified, so the labels say the suffix and you
+  -- can see what lands.
   healing = {
-    { label = 'Medkit, common',   record = 'Items.FirstAidWhiteOne',   default = 10, step = 5 },
-    { label = 'Medkit, uncommon', record = 'Items.FirstAidWhiteTwo',   default = 10, step = 5 },
-    { label = 'Medkit, rare',     record = 'Items.FirstAidWhiteThree', default = 10, step = 5 },
-    { label = 'MaxDoc, rare',     record = 'Items.CPO_MaxDoc',         default = 10, step = 5 },
-    { label = 'Bounce Back, rare',record = 'Items.CPO_BounceBack',     default = 10, step = 5 },
+    { label = 'Health item, V0',   record = 'Items.FirstAidWhiffV0', default = 10, step = 5,
+      note = 'The FirstAidWhiff ladder is the game healing item, shown in your inventory as MaxDoc. Confirmed present on 2.5; the tier each suffix maps to is not.' },
+    { label = 'Health item, V1',   record = 'Items.FirstAidWhiffV1', default = 10, step = 5 },
+    { label = 'Health item, V2',   record = 'Items.FirstAidWhiffV2', default = 10, step = 5 },
+    { label = 'Health item, uncommon', record = 'Items.FirstAidWhiffVUncommon', default = 10, step = 5 },
+    { label = 'Health item, rare+',    record = 'Items.FirstAidWhiffVRarePlus', default = 10, step = 5 },
+    { label = 'Health item, epic',     record = 'Items.FirstAidWhiffVEpic', default = 10, step = 5 },
+    { label = 'Health item, legendary+', record = 'Items.FirstAidWhiffVLegendaryPlus', default = 10, step = 5 },
+
+    -- NOT confirmed. Searching for "BounceBack" found nothing, which given
+    -- FirstAidWhiff means the stored name is unrelated to the display name
+    -- here too. BonesMcCoy70 is the community's reported internal name for
+    -- Bounce Back; it is a hypothesis, it is labelled as one, and if it greys
+    -- out on your build then it is wrong and Find it on this build will say
+    -- what is right. It is here rather than omitted precisely so that check
+    -- runs.
+    { label = 'Bounce Back, V0 (unconfirmed id)', record = 'Items.BonesMcCoy70V0', default = 10, step = 5,
+      note = 'Hypothesis, not verified against any build. If this row is greyed out the id is wrong: press Find it on this build in Diagnostics.' },
   },
 
   -- ========================================================================

@@ -284,6 +284,45 @@ local function verifyAll()
     end
 end
 
+-- ---------------------------------------------------------------------------
+-- Reading an attribute back off the character.
+--
+-- The panel used to show a bare 15 beside the five attribute names. That was
+-- the default value of the input box and nothing to do with the character --
+-- a number sitting next to five attribute labels reads as a readout, and this
+-- one was not one. So read the real values, and where they cannot be read say
+-- that instead of printing a number that means nothing.
+--
+-- Two routes, tried in order, because neither is guaranteed on a build.
+-- ---------------------------------------------------------------------------
+local ATTR_READERS = {
+    { 'StatsSystem:GetStatValue', function(stat)
+        local pl = Game.GetPlayer()
+        return Game.GetStatsSystem():GetStatValue(pl:GetEntityID(), gamedataStatType[stat])
+    end },
+    { 'DevelopmentData:GetAttributeValue', function(stat)
+        local pl = Game.GetPlayer()
+        return PlayerDevelopmentSystem.GetInstance(pl):GetDevelopmentData(pl)
+            :GetAttributeValue(gamedataStatType[stat])
+    end },
+    { 'DevelopmentData:GetAttributeLevel', function(stat)
+        local pl = Game.GetPlayer()
+        return PlayerDevelopmentSystem.GetInstance(pl):GetDevelopmentData(pl)
+            :GetAttributeLevel(gamedataStatType[stat])
+    end },
+}
+
+local function readAttribute(stat)
+    for _, r in ipairs(ATTR_READERS) do
+        local ok, v = pcall(r[2], stat)
+        if ok and type(v) == 'number' and v > 0 then
+            state.attrSrc = r[1]
+            return math.floor(v + 0.5)
+        end
+    end
+    return nil
+end
+
 -- Functions cannot be looked up in TweakDB the way item ids can, so they are
 -- probed against the Game object instead. A missing one greys out its row
 -- rather than throwing when you press the button.
@@ -1650,14 +1689,30 @@ local function tabWorld()
 
     section('attributes', 'ArmFlex')
     if ACTIONS.setAttribute.probe() then
+        textc(COL.dim, 'Current value on the left. The box is what a button will set it TO.')
         local n = amountBox('attrv', 15, 1)
+        same(); textc(COL.dim, 'set to this')
+        local anyRead = false
         for i, a in ipairs(data.attributes or {}) do
-            if i > 1 and (i % 3) ~= 1 then same() end
-            if ImGui.Button(a.label .. '##at' .. i) then
+            local cur = readAttribute(a.arg)
+            if cur then anyRead = true end
+            statusIcon(cur and 'ok' or 'warn')
+            sameAt(30);  ImGui.Text(a.label)
+            sameAt(190); textc(cur and COL.cyan or COL.dim,
+                               cur and tostring(cur) or 'could not read')
+            sameAt(250)
+            -- The button says the number, so there is no way to press it
+            -- thinking it does something else.
+            if ImGui.Button(('Set to %d##at%d'):format(n, i)) then
                 local ok, res = ACTIONS.setAttribute.run(a.arg, n)
-                note(verdict(a.label .. ' -> ' .. n, ok, res,
+                note(verdict(('%s %s -> %d'):format(a.label, tostring(cur or '?'), n), ok, res,
                     a.verified and '' or 'This attribute name is inferred, not documented.'))
             end
+        end
+        if anyRead then
+            textc(COL.dim, ic('Eye') .. 'read via ' .. (state.attrSrc or 'unknown'))
+        else
+            textc(COL.warn, 'None of the three read routes answered on this build, so the values above are unknown rather than zero.')
         end
         textc(COL.dim, 'Only Body (Strength) has a documented internal name. The other four are inferred.')
     else
@@ -1692,6 +1747,29 @@ local function tabWorld()
             local ok, got = ACTIONS.devPoints.run(n, 'Attribute')
             note(ok and ('OK  added %d of %d attribute point(s)'):format(got, n)
                     or 'FAIL the development system refused')
+        end
+
+        -- Relic points. There is no skillbook for these on 2.5 -- the item id
+        -- that used to be here is not in TweakDB at all -- so they come from
+        -- the same development system as the other two. The enum member is
+        -- looked up by name first, because the one thing worse than no button
+        -- is a button that quietly adds the wrong kind of point.
+        local relicKind
+        for _, k in ipairs({ 'Relic', 'Espionage', 'Primary_Relic' }) do
+            local okk, v = pcall(function() return gamedataDevelopmentPointType[k] end)
+            if okk and v ~= nil then relicKind = k; break end
+        end
+        if relicKind then
+            same()
+            if ImGui.Button('Relic points##relic') then
+                local ok, got = ACTIONS.devPoints.run(n, relicKind)
+                note(ok and ('OK  added %d of %d relic point(s) as %s'):format(got, n, relicKind)
+                        or 'FAIL the development system refused ' .. relicKind)
+            end
+            hint('Uses gamedataDevelopmentPointType.' .. relicKind
+                 .. ', found on this build. Relic points are Phantom Liberty content, so this does nothing without it.')
+        else
+            textc(COL.dim, 'Relic points: no matching member of gamedataDevelopmentPointType on this build, so there is no safe call to make.')
         end
     else
         textc(COL.bad, ACTIONS.devPoints.needs .. ' is not available on this build')
@@ -1924,21 +2002,24 @@ local function needlesFor(id)
     local tail = tostring(id):match('([^%.]+)$') or tostring(id)
     tail = tail:gsub('^CPO_', '')
     local out, seen = {}, {}
-    local function add(s)
-        if s and #s >= 4 then
+    local function add(s, min)
+        if s and #s >= (min or 4) then
             s = s:lower()
             if not seen[s] then seen[s] = true; out[#out + 1] = s end
         end
     end
+    -- Trimming a full id is specific, so four characters is enough.
     add(tail)
     add((tail:gsub('%d+$', '')))
     add((tail:gsub('_[^_]*$', '')))
-    -- camel-case tokens: FirstAidWhiteOne -> First, Aid, White, One
+    -- A single camel-case word is not. "BounceBack" gave up its last token as
+    -- "back", which matched five backstory shards and a keycard and told us
+    -- nothing. Six characters minimum for anything token-derived.
     local tok = {}
     for w in tail:gmatch('%u%l+') do tok[#tok + 1] = w end
-    if #tok >= 2 then add(tok[1] .. tok[2]) end
-    if #tok >= 1 then add(tok[1]) end
-    if #tok >= 1 then add(tok[#tok]) end
+    if #tok >= 2 then add(tok[1] .. tok[2], 6) end
+    if #tok >= 1 then add(tok[1], 6) end
+    if #tok >= 1 then add(tok[#tok], 6) end
     return out, tail
 end
 
@@ -2428,10 +2509,34 @@ end
 -- label, which is what was clipping before the rail got wider.
 local function navButton(i)
     local name, count = TABS[i], navCount(i)
+    local on = (state.tab == i)
     local plain = not (state.fancy ~= false and caps.GetWindowDrawList
                    and caps.GetItemRectMin and caps.GetItemRectMax)
     local label = (plain and count) and (name .. '   ' .. count) or name
+
+    -- The open tab has to look open. There was no selected state here at all:
+    -- the highlight that shows up in screenshots is ImGui's hover, which
+    -- follows the mouse rather than the page you are on, so the moment the
+    -- pointer moved there was nothing saying where you were. The open one is
+    -- filled with the accent, which is a lightness difference and not only a
+    -- hue, so it still reads if the colour does not.
+    local pushed = 0
+    if on and caps.style then
+        local function pc(n, c, al)
+            local idx
+            if not pcall(function() idx = ImGuiCol[n] end) or idx == nil then return end
+            if pcall(function() ImGui.PushStyleColor(idx, c[1], c[2], c[3], al or 1.0) end) then
+                pushed = pushed + 1
+            end
+        end
+        local Pc = A()
+        pc('Button',        Pc)
+        pc('ButtonHovered', mix(Pc, { 1, 1, 1 }, 0.18))
+        pc('ButtonActive',  Pc)
+        pc('Text',          onCol(Pc))
+    end
     if ImGui.Button(label .. '##nav' .. i, -1, 0) then state.tab = i end
+    if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
     if plain or not count then return end
     pcall(function()
         local x1, y1 = ImGui.GetItemRectMin()
