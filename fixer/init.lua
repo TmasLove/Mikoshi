@@ -50,6 +50,7 @@ local state = {
     icons       = true,
     theme       = 1,
     psy         = nil,
+    psyShow     = false,
     tp          = { cur = nil, text = '', name = '', saved = {} },
     weather     = nil,  -- filled on first use of the World tab
     weatherType = nil,
@@ -155,6 +156,7 @@ local function detectImGui()
                          'PushStyleColor', 'PopStyleColor', 'PushStyleVar', 'PopStyleVar',
                          'SeparatorText', 'Dummy', 'Indent', 'Unindent', 'ProgressBar',
                          'SetWindowFontScale', 'GetWindowDrawList', 'GetCursorScreenPos', 'SetNextItemWidth',
+                         'CollapsingHeader',
                          'GetContentRegionAvail', 'GetItemRectMin', 'GetItemRectMax', 'CalcTextSize' }) do
         caps[n] = fnExists(ImGui, n)
     end
@@ -808,35 +810,71 @@ local function tabQuestFixes()
     textc(COL.dim, 'Force-complete removed: no undo, and its enum did not resolve on this build.')
     sep()
 
-    ImGui.Text('Known fact fixes')
-    textc(COL.dim, 'Read before write. Every change lands in the Undo tab.')
+    section('known fact fixes', 'Wrench')
+    textc(COL.dim, 'Read before write. A fix already applied on this save cannot be pressed again.')
     for i, f in ipairs(data.facts or {}) do
-        ImGui.Text(f.label)
-        same(); statusIcon(f.verified and 'ok' or 'warn')
+        -- Read the fact first. If it already holds the value this fix writes,
+        -- the fix is a no-op on this save, so the button is replaced by a note
+        -- rather than left there inviting a pointless write to the Undo log.
+        local cur, readOk = nil, false
+        if api.getFact then
+            local ok, v = pcall(function() return api.getFact(f.fact) end)
+            if ok then cur, readOk = v, true end
+        end
+        local applied = readOk and cur ~= nil and cur == f.value
+
+        statusIcon(applied and 'ok' or (f.verified and 'ok' or 'warn'))
+        sameAt(30); ImGui.Text(f.label)
         if f.note then hint(f.note) end
-        if api.setFact then
+
+        if applied then
+            same(); textc(COL.ok, 'already set to ' .. tostring(f.value) .. ', nothing to do')
+        elseif api.setFact then
+            if readOk and cur ~= nil then
+                same(); textc(COL.dim, 'currently ' .. tostring(cur))
+            end
             if ImGui.Button('Apply##fact' .. i) then
                 local ok, msg = setFactLogged(f.fact, f.value)
                 note((ok and 'OK  ' or 'FAIL ') .. msg)
             end
             same()
             if ImGui.Button('Read##fact' .. i) then
-                local ok, v = pcall(function() return api.getFact(f.fact) end)
-                note('%s = %s', f.fact, ok and tostring(v) or 'read failed')
+                note('%s = %s', f.fact, readOk and tostring(cur) or 'read failed')
             end
         else
-            textc(COL.bad, 'SetFactStr unavailable')
+            textc(COL.bad, 'SetFactStr unavailable on this build')
         end
-        sep()
+    end
+    sep()
+
+    -- Collapsed by default, and ImGui remembers the open state per window in
+    -- its own layout file, so once you have finished the sightings it stays
+    -- shut without the mod having to store anything.
+    local psyOpen = false
+    if caps.CollapsingHeader then
+        local ok, open = pcall(function()
+            return ImGui.CollapsingHeader(ic('AccountAlert') .. 'CYBERPSYCHO SIGHTINGS  (' ..
+                #(data.cyberpsychos or {}) .. ')')
+        end)
+        psyOpen = ok and open or false
+        if not ok then psyOpen = state.psyShow == true end
+    else
+        state.psyShow = state.psyShow == true
+        if ImGui.Button((state.psyShow and 'Hide' or 'Show') ..
+                ' the 17 cyberpsycho sightings##psytoggle') then
+            state.psyShow = not state.psyShow
+        end
+        psyOpen = state.psyShow
     end
 
-    section('cyberpsycho sightings', 'AccountAlert')
-    textc(COL.warn, 'Before anything else: open your shards and read the ones you already hold.')
-    hint('A sighting often stays open because a shard you already picked up was never READ. That closes more of these than any command here. The list below is a reference for finding the one you have not done.')
-    for i, p in ipairs(data.cyberpsychos or {}) do
-        ImGui.Text(p.name)
-        sameAt(260); textc(COL.dim, p.district)
-        sameAt(470); textc(COL.dim, p.id)
+    if psyOpen then
+        textc(COL.warn, 'Before anything else: open your shards and read the ones you already hold.')
+        hint('A sighting often stays open because a shard you already picked up was never READ. That closes more of these than any command here. The list below is a reference for finding the one you have not done.')
+        for i, p in ipairs(data.cyberpsychos or {}) do
+            ImGui.Text(p.name)
+            sameAt(260); textc(COL.dim, p.district)
+            sameAt(470); textc(COL.dim, p.id)
+        end
     end
     sep()
 
