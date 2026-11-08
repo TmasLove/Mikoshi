@@ -1147,19 +1147,6 @@ local function drawnBanner()
     return ok
 end
 
-local function banner()
-    if not drawnBanner() then
-        -- Fallback: one font at one size, so scale it for the title line only.
-        local scaled = caps.SetWindowFontScale and pcall(function() ImGui.SetWindowFontScale(1.45) end)
-        bar('M I K O S H I', A()[1], A()[2], A()[3], scaled and 38 or 30)
-        if scaled then pcall(function() ImGui.SetWindowFontScale(1.0) end) end
-        textc(COL.accent, ic('ChevronRight') .. 'NIGHT CITY TOOLKIT')
-    end
-    textc(COL.cyan, string.format('%sv%s   %sgame 2.5   %sCET 1.38.1   %s%d/%d ids verified',
-        ic('Wrench'), VERSION, ic('Gamepad'), ic('Chip'), ic('CheckCircle'),
-        state.idsFound or 0, state.idsChecked or 0))
-end
-
 -- Colour the status strip by what actually happened, so a refusal is visible
 -- without reading the sentence.
 local function statusStrip()
@@ -1252,9 +1239,9 @@ end
 -- been caught assuming a CET binding exists -- the entire draw list turned out
 -- not to be bound. A Button is bound everywhere, defaults however we like, and
 -- can be painted in the palette like the rest of the window.
-local function section(title, icon)
+local function section(title, icon, closedByDefault)
     local open = state.folds[title]
-    if open == nil then open = true end
+    if open == nil then open = not closedByDefault end
 
     local marker
     if Icons and state.icons ~= false then
@@ -1304,6 +1291,38 @@ local function section(title, icon)
     return true
 end
 
+
+-- banner() lives below section() because it calls it. A local declared above
+-- its caller is fine; a local called above its declaration is a nil global,
+-- which is the single most common bug in this file.
+local function banner()
+    if not drawnBanner() then
+        -- Fallback: one font at one size, so scale it for the title line only.
+        local scaled = caps.SetWindowFontScale and pcall(function() ImGui.SetWindowFontScale(1.45) end)
+        bar('M I K O S H I', A()[1], A()[2], A()[3], scaled and 38 or 30)
+        if scaled then pcall(function() ImGui.SetWindowFontScale(1.0) end) end
+        textc(COL.accent, ic('ChevronRight') .. 'NIGHT CITY TOOLKIT')
+    end
+
+    -- A problem is never folded away. If anything failed to verify, that line
+    -- stays out where it cannot be missed -- hiding it behind a shut fold is
+    -- exactly how it stops being noticed, and the point of checking ids at all
+    -- is that you find out.
+    local short = (state.idsChecked or 0) - (state.idsFound or 0)
+    if short > 0 then
+        textc(COL.warn, string.format('%s%d of %d ids are not on this build. Diagnostics names them.',
+            ic('AlertCircle'), short, state.idsChecked or 0))
+    end
+
+    -- The rest was four facts sitting permanently under the title that nobody
+    -- needs until they are writing a bug report. Folded, and shut by default.
+    if section('build', 'InformationOutline', true) then
+        textc(COL.cyan, string.format('%sMikoshi %s   %sgame 2.5   %sCET 1.38.1',
+            ic('Wrench'), VERSION, ic('Gamepad'), ic('Chip')))
+        textc(short > 0 and COL.warn or COL.ok, string.format('%s%d of %d catalogue ids verified against your TweakDB',
+            ic('CheckCircle'), state.idsFound or 0, state.idsChecked or 0))
+    end
+end
 
 local function amountBox(key, default, step)
     if state.amounts[key] == nil then state.amounts[key] = default or 1 end
