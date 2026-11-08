@@ -50,7 +50,12 @@ local state = {
     -- The tracking guard. list holds { key, label } for quests that are not
     -- allowed to hold journal focus; lastGood is the entry focus goes back to.
     guard       = { on = false, list = {}, lastGood = nil, at = 0,
-                    hits = 0, fails = 0, keySrc = nil, err = nil },
+                    hits = 0, fails = 0, keySrc = nil, err = nil,
+                    -- ticks proves onUpdate fires at all, passes proves the
+                    -- guard got past its own throttle and guards. Without
+                    -- these there is no way to tell a guard that is failing
+                    -- to move focus from one that is never running.
+                    ticks = 0, passes = 0, last = nil },
     found       = {},      -- missing id -> candidates read out of live TweakDB
     fields      = {},      -- template input boxes
     probe       = { fact = 'ig_phone_manager_off', item = 'Items.money' },
@@ -725,6 +730,9 @@ end
 
 local function guardTick(dt)
     local g = state.guard
+    -- Counted before any early return, so a zero here means onUpdate itself
+    -- never fired and nothing below this line was ever the problem.
+    g.ticks = g.ticks + 1
     if not g.on or #g.list == 0 then return end
     if not (api.journalOk and api.trackOk) then return end
 
@@ -733,6 +741,7 @@ local function guardTick(dt)
     g.at = g.at + (dt or 0)
     if g.at < 0.25 then return end
     g.at = 0
+    g.passes = g.passes + 1
 
     local ok, tracked = pcall(function() return api.journal:GetTrackedEntry() end)
     if not ok or tracked == nil then return end
@@ -1538,7 +1547,7 @@ local function tabQuestFixes()
     end
     sep()
 
-    if section('stop a quest taking focus', 'PinOff') then
+    if section('stop a quest taking focus', 'PinOff', true) then
         wrapped('Finishing anything hands the journal back to the main story, which is a problem when the main story is the one quest you are saving for last. A blocked quest cannot hold focus: the moment it takes it, focus goes back to whatever you were tracking before.')
         if not api.trackOk then
             textc(COL.bad, 'gameJournalManager:TrackEntry is not on this build, so focus cannot be handed back')
@@ -1594,7 +1603,23 @@ local function tabQuestFixes()
                 'TrackEntry: ' .. (api.trackOk and 'present' or 'NOT on this build, so focus cannot be moved'))
                 textc(g.lastGood and COL.ok or COL.warn, 'somewhere to put focus back: '
                 .. (g.lastGood and 'yes' or 'not yet. Track any other quest once and it will have one.'))
+                textc(g.ticks > 0 and COL.ok or COL.bad, string.format(
+                    'onUpdate fired %d time(s), guard ran %d pass(es)', g.ticks, g.passes))
                 if g.last then textc(COL.dim, 'last pass: ' .. tostring(g.last)) end
+
+                -- Blocked and never actually moved is the state this was in,
+                -- and a list of blocked quests sitting there quietly is
+                -- indistinguishable from one that works. Say it outright.
+                if g.on and #g.list > 0 and g.hits == 0 then
+                    if g.ticks == 0 then
+                        textc(COL.bad, ic('AlertCircle') .. 'NOT WORKING: onUpdate never fired, so the guard has never run once. Nothing below it has been reached.')
+                    elseif g.passes == 0 then
+                        textc(COL.bad, ic('AlertCircle') .. 'NOT WORKING: the guard never got past its own throttle.')
+                    else
+                        textc(COL.bad, ic('AlertCircle') .. 'NOT WORKING: the guard has run but has never moved focus off a blocked quest. Blocking is being remembered and not enforced.')
+                        textc(COL.dim, 'Dump the journal manager below and send the console output: the three routes it tries are not the right call on this build.')
+                    end
+                end
                 if g.err then textc(COL.warn, g.err) end
                 if ImGui.Button('Dump the journal manager to the log##jdump') then
                 local ok, out = pcall(function() return Dump(api.journal, false) end)
