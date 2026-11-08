@@ -1531,11 +1531,12 @@ local function tabDiagnostics()
     sep()
 
     section('keybind')
-    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: show menu", click the empty box, press the key you want, then Save.')
+    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin status card", click the empty box, press the key you want, then Save.')
     textc(state.pinned and COL.ok or COL.dim,
         state.pinned and 'pinned: the menu stays on screen with the overlay shut'
                        or 'not pinned: the menu shows only while the overlay is open')
-    textc(COL.dim, 'Clicking always needs the overlay open. CET only routes input to ImGui then.')
+    textc(COL.warn, 'Your key pins a small status card only. To USE the menu, open the CET overlay.')
+    textc(COL.dim, 'CET sends mouse and keyboard to ImGui only while its overlay is showing, and a mod cannot open that overlay. Nothing to fix here.')
     sep()
 
     ImGui.Text('Resolved game API')
@@ -1658,32 +1659,45 @@ registerForEvent('onOverlayOpen',  function() state.overlayOpen = true  end)
 registerForEvent('onOverlayClose', function() state.overlayOpen = false end)
 
 registerForEvent('onDraw', function()
-    -- Pinned draws with the overlay shut, which is what the hotkey is for.
     if not mod.ready then return end
-    if not (state.pinned or (state.overlayOpen and state.show)) then return end
+
+    -- Pinned with the overlay shut: CET sends no mouse or keyboard to ImGui
+    -- then, and a mod cannot open the overlay itself. Drawing the full menu
+    -- there just produces a window whose buttons ignore you. So the pin shows
+    -- a small read-only card instead, and says how to actually use it.
+    if state.pinned and not state.overlayOpen then
+        pushTheme()
+        ImGui.SetNextWindowSize(360, 112, ImGuiCond.FirstUseEver)
+        if ImGui.Begin('MIKOSHI') then
+            textc(COL.accent, ic('Wrench') .. 'MIKOSHI')
+            same(); textc(COL.dim, 'v' .. VERSION)
+            sep()
+            textc(COL.warn, 'Open the CET overlay to use the menu.')
+            textc(COL.dim, 'Nothing here responds until it is open. That is a CET rule:')
+            textc(COL.dim, 'it only sends input to ImGui while the overlay is showing.')
+            sep()
+            textc(COL.dim, state.log[1] or 'ready')
+        end
+        ImGui.End()
+        popTheme()
+        return
+    end
+
+    if not (state.overlayOpen and state.show) then return end
 
     pushTheme()
     ImGui.SetNextWindowSize(640, 660, ImGuiCond.FirstUseEver)
     if ImGui.Begin('MIKOSHI') then
-
         banner()
-        if not state.overlayOpen then
-            textc(COL.warn, 'Overlay closed. The menu is readable but nothing in it will click.')
-        end
         sep()
 
-        -- Sidebar of categories, content on the right. The two children are
-        -- sized to leave 30px for the status strip at the bottom.
         local okNav = caps.BeginChild and
             pcall(function() ImGui.BeginChild('fx_nav', 198, -30, true) end)
         if okNav then
-            for i = 1, #TABS do
-                navButton(i)
-            end
+            for i = 1, #TABS do navButton(i) end
             ImGui.EndChild()
             same()
         else
-            -- No child windows on this build: fall back to a row of buttons.
             for i = 1, #TABS do
                 if i > 1 then same() end
                 if ImGui.Button(TABS[i] .. '##nav' .. i) then state.tab = i end
@@ -1695,7 +1709,6 @@ registerForEvent('onDraw', function()
             pcall(function() ImGui.BeginChild('fx_body', 0, -30, false) end)
         local fn = TAB_FN[state.tab]
         if fn then
-            -- A crash inside one category must not take the window with it.
             local ok, err = pcall(fn)
             if not ok then textc(COL.bad, 'category error: ' .. tostring(err)) end
         end
@@ -1705,8 +1718,6 @@ registerForEvent('onDraw', function()
         statusStrip()
     end
     ImGui.End()
-    -- Pops must happen whether or not Begin returned true, or the stack leaks
-    -- a frame's worth of colours every time the window is collapsed.
     popTheme()
 end)
 
@@ -1716,13 +1727,13 @@ end)
 
 -- Root level, outside any event: CET requires it there. CET does not let a mod
 -- ship a default key, so this appears UNBOUND in the overlay's Bindings tab
--- until you assign one. Bindings > "Mikoshi: show menu" > click > press a key >
+-- until you assign one. Bindings > "Mikoshi: pin status card" > click > press a key >
 -- Save.
 --
 -- Pinning draws the window with the overlay shut, which is the point of having
 -- a key at all. Clicking still needs the overlay, because CET only routes mouse
 -- and keyboard into ImGui while it is open. That is a CET rule, not a choice.
-registerHotkey('fixer_toggle', 'Mikoshi: show menu', function()
+registerHotkey('fixer_toggle', 'Mikoshi: pin status card', function()
     state.pinned = not state.pinned
     if state.pinned then state.show = true end
 end)

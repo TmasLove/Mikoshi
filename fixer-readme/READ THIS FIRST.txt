@@ -63,16 +63,24 @@ until you set one.
 
   1. Open the CET overlay
   2. Go to the Bindings tab
-  3. Find "Mikoshi: show menu"
+  3. Find "Mikoshi: pin status card"
   4. Click the empty box next to it
   5. Press the key you want
   6. Press Save
 
-That key then pins the window on screen even with the overlay closed.
+WHAT YOUR KEY ACTUALLY DOES
+---------------------------
+It pins a small status card on screen with the overlay closed. That card is
+read-only on purpose.
 
-One honest limit: clicking anything still needs the overlay open, because CET
-only sends mouse and keyboard input to the overlay while it is showing. The
-pinned window is readable with the overlay closed, but not clickable.
+To USE the menu you open the CET overlay, the key you chose when CET first
+ran, usually F1. The full menu appears there.
+
+This is not a limitation of Mikoshi and it is not fixable by any mod. CET
+sends mouse and keyboard input to its ImGui windows only while its own
+overlay is showing, and a mod has no way to open that overlay itself. So the
+sequence is: overlay key to work with the menu, your Mikoshi key to glance at
+status while playing.
 
 
 IF SOMETHING LOOKS GREYED OUT

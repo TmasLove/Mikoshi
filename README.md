@@ -38,7 +38,7 @@ Open the CET overlay, press **Reload All Mods**. No restart. To remove it,
 delete the folder; it writes nothing outside its own directory except a one-line
 `theme.txt` beside itself.
 
-To bind a key: overlay, **Bindings**, "Mikoshi: show menu". CET does not let a mod
+To bind a key: overlay, **Bindings**, "Mikoshi: pin status card". CET does not let a mod
 ship a default key, so it starts unbound.
 
 ## The rule this is built on
