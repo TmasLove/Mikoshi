@@ -104,8 +104,10 @@ The Diagnostics category lists exactly what your build exposes.
 
 UNINSTALL
 ---------
-Delete the "fixer" folder. Mikoshi writes nothing outside its own directory
-apart from a one-line theme.txt beside itself holding your chosen palette.
+Delete the "fixer" folder. Mikoshi writes nothing outside its own
+directory. Inside it, beside init.lua, it keeps four small text files: your
+chosen palette, your watch list, any quests you blocked from taking journal
+focus, and which sections you folded shut.
 
 
 REQUIREMENTS, SHORT VERSION

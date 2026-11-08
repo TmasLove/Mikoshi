@@ -46,6 +46,7 @@ local state = {
     armed       = false,   -- force-complete safety
     records     = {},      -- id -> true/false, filled at onInit
     missing     = {},      -- the rows whose record is not on this build
+    folds       = {},      -- section title -> open, persisted beside the mod
     -- The tracking guard. list holds { key, label } for quests that are not
     -- allowed to hold journal focus; lastGood is the entry focus goes back to.
     guard       = { on = false, list = {}, lastGood = nil, at = 0,
@@ -69,7 +70,12 @@ local state = {
 -- Forward declared: tabWorld (defined above the Browse section) calls both of
 -- these, and a local declared further down the file would not be in scope
 -- there. Lua would resolve them as globals and find nil at click time.
-local verdict, recordName
+-- describe() reads an item's real display name out of TweakDB. It is defined
+-- down with the Browse code because that is where it grew up, but grantRow --
+-- six hundred lines above it -- needs it to put the in-game name on a row, and
+-- a local declared below its caller resolves as a global and is nil when the
+-- button is pressed. That has cost this file four separate bugs.
+local verdict, recordName, describe
 
 -- CET ships 7097 Material Design glyphs and the font to render them
 -- (cyber_engine_tweaksontsmaterialdesignicons.ttf), so the menu can have
@@ -1141,6 +1147,32 @@ local function colourBar(c, w, h)
     return ok
 end
 
+-- Which sections are folded outlives a reload, beside the theme and the watch
+-- list. Only the CLOSED ones are written: open is the default, so the file
+-- stays empty until you actually fold something.
+local function saveFolds()
+    pcall(function()
+        local f = io.open('folds.txt', 'w')
+        if not f then return end
+        for k, v in pairs(state.folds) do
+            if v == false then f:write(k .. '\n') end
+        end
+        f:close()
+    end)
+end
+
+local function loadFolds()
+    pcall(function()
+        local f = io.open('folds.txt', 'r')
+        if not f then return end
+        for line in f:lines() do
+            local k = line:match('^%s*(.-)%s*$')
+            if k and #k > 0 then state.folds[k] = false end
+        end
+        f:close()
+    end)
+end
+
 -- A thin accent rule, drawn where the draw list exists. Section headers get a
 -- hairline instead of relying on ImGui's own grey separator.
 local function accentRule(alpha)
@@ -1156,20 +1188,65 @@ local function accentRule(alpha)
     return ok
 end
 
+-- A section folds, and returns whether it is open so the tab can skip its
+-- body. A category runs to thirty rows and most of the time you want one of
+-- them.
+--
+-- The header is a Button, not an ImGui CollapsingHeader. CollapsingHeader
+-- cannot default to open without ImGuiTreeNodeFlags, and this file has already
+-- been caught assuming a CET binding exists -- the entire draw list turned out
+-- not to be bound. A Button is bound everywhere, defaults however we like, and
+-- can be painted in the palette like the rest of the window.
 local function section(title, icon)
-    local label = ic(icon or 'ChevronRight') .. string.upper(title)
-    -- A separator bar with the label inset reads as a section; a coloured line
-    -- of text reads as one more row. Use the real widget where it exists.
-    textc(COL.accent, label)
-    if accentRule() then return end
+    local open = state.folds[title]
+    if open == nil then open = true end
+
+    local marker
+    if Icons and state.icons ~= false then
+        marker = ic(open and 'ChevronDown' or 'ChevronRight')
+    else
+        marker = open and '[-] ' or '[+] '
+    end
+    local label = marker .. (icon and ic(icon) or '') .. string.upper(title)
+
+    local pushed = 0
+    if caps.style then
+        local function pc(n, c, al)
+            local idx
+            if not pcall(function() idx = ImGuiCol[n] end) or idx == nil then return end
+            if pcall(function() ImGui.PushStyleColor(idx, c[1], c[2], c[3], al or 1.0) end) then
+                pushed = pushed + 1
+            end
+        end
+        -- Transparent fill, so it still reads as a heading and not as one more
+        -- button in a window already full of them. It lights up on hover,
+        -- which is the only hint it needs that it can be clicked.
+        pc('Button',        surf(0.03), 0.0)
+        pc('ButtonHovered', surf(0.10, 0.30))
+        pc('ButtonActive',  surf(0.14, 0.45))
+        pc('Text',          COL.accent)
+    end
+    local hit = false
+    pcall(function() hit = ImGui.Button(label .. '##sec_' .. title, -1, 0) end)
+    if pushed > 0 then pcall(function() ImGui.PopStyleColor(pushed) end) end
+
+    if hit then
+        open = not open
+        state.folds[title] = open
+        saveFolds()
+    end
+    if not open then return false end
+
+    if accentRule() then return true end
     -- No draw list, which is the normal case on CET. Two coloured segments
     -- still read as a rule, where ImGui's grey Separator reads as nothing.
     if colourBar(A(), 46, 3) then
         same()
-        if colourBar(B(), -1, 3) then return end
-        return
+        colourBar(B(), -1, 3)
+        return true
     end
     if caps.SeparatorText then pcall(function() ImGui.Separator() end) end
+    return true
 end
 
 
@@ -1240,12 +1317,32 @@ local function hint(text)
 end
 
 -- A row that can only fire when its id is real.
+-- Is one of these strings already saying what the other says? Used to decide
+-- whether the in-game name adds anything to a row, so "Eddies [Eddies]" never
+-- happens.
+local function sameish(a, b)
+    a, b = tostring(a):lower(), tostring(b):lower()
+    if #a < 3 or #b < 3 then return a == b end
+    return a:find(b, 1, true) ~= nil or b:find(a, 1, true) ~= nil
+end
+
 local function grantRow(key, label, record, default, step, noteText, loop)
     local present = state.records[record]
     if present == nil then present = recordExists(record); state.records[record] = present end
 
     statusIcon(present and 'ok' or 'bad')
     sameAt(30); ImGui.Text(label)
+    -- What the game will actually call this when it lands in your inventory.
+    -- The catalogue label says what a row is FOR; this says what it IS, and it
+    -- is the only way to tell FirstAidWhiffV1 from FirstAidWhiffV2 without
+    -- giving one and going to look. Read from TweakDB and cached, so it costs
+    -- a table lookup after the first frame.
+    if present then
+        local real = describe(record).name
+        if real and not sameish(real, label) then
+            same(); textc(COL.cyan, '[' .. real .. ']')
+        end
+    end
     if noteText then hint(noteText) end
     if not present then hint("Not in this build's TweakDB: " .. record) end
 
@@ -1364,165 +1461,167 @@ local function tabQuestFixes()
     end
     sep()
 
-    section('stop a quest taking focus', 'PinOff')
-    wrapped('Finishing anything hands the journal back to the main story, which is a problem when the main story is the one quest you are saving for last. A blocked quest cannot hold focus: the moment it takes it, focus goes back to whatever you were tracking before.')
-    if not api.trackOk then
-        textc(COL.bad, 'gameJournalManager:TrackEntry is not on this build, so focus cannot be handed back')
-    else
-        local g = state.guard
-        g.on = ImGui.Checkbox('guard the tracked quest', g.on)
-        same()
-        if ImGui.Button('Save##guardsave') then saveBlocked(); note('guard settings saved') end
-
-        -- Blocking by id typed from memory is how three shard ids ended up
-        -- wrong in this project. Press it while the quest is tracked and the
-        -- game supplies its own name for it.
-        if ImGui.Button('Block the quest I am tracking now##guardadd') then
-            local q = resolveTrackedQuest()
-            local key = entryKey(q)
-            if key == nil then
-                note('FAIL could not read an id for the tracked quest, so it cannot be blocked')
-            elseif isBlocked(key) then
-                note('that quest is already blocked')
-            else
-                g.list[#g.list + 1] = { key = key, label = entryLabel(q) or key }
-                saveBlocked()
-                note('OK  blocked %s', g.list[#g.list].label)
-            end
-        end
-        hint('Track the quest in your journal first, then press this. Mikoshi reads whatever your build calls it rather than guessing an id.')
-
-        if #g.list == 0 then
-            textc(COL.dim, 'Nothing blocked. Track Nocturne Op55N1, press the button, then track what you actually want to play.')
+    if section('stop a quest taking focus', 'PinOff') then
+        wrapped('Finishing anything hands the journal back to the main story, which is a problem when the main story is the one quest you are saving for last. A blocked quest cannot hold focus: the moment it takes it, focus goes back to whatever you were tracking before.')
+        if not api.trackOk then
+            textc(COL.bad, 'gameJournalManager:TrackEntry is not on this build, so focus cannot be handed back')
         else
-            for i = #g.list, 1, -1 do
-                statusIcon(g.on and 'ok' or 'warn')
-                sameAt(30); ImGui.Text(g.list[i].label or g.list[i].key)
-                sameAt(340)
-                if ImGui.Button('Unblock##gub' .. i) then
-                    table.remove(g.list, i); saveBlocked()
+            local g = state.guard
+            g.on = ImGui.Checkbox('guard the tracked quest', g.on)
+            same()
+            if ImGui.Button('Save##guardsave') then saveBlocked(); note('guard settings saved') end
+
+            -- Blocking by id typed from memory is how three shard ids ended up
+            -- wrong in this project. Press it while the quest is tracked and the
+            -- game supplies its own name for it.
+            if ImGui.Button('Block the quest I am tracking now##guardadd') then
+                local q = resolveTrackedQuest()
+                local key = entryKey(q)
+                if key == nil then
+                    note('FAIL could not read an id for the tracked quest, so it cannot be blocked')
+                elseif isBlocked(key) then
+                    note('that quest is already blocked')
+                else
+                    g.list[#g.list + 1] = { key = key, label = entryLabel(q) or key }
+                    saveBlocked()
+                    note('OK  blocked %s', g.list[#g.list].label)
                 end
             end
-            textc(COL.dim, string.format('%s key read via %s. Handed focus back %d time(s) this session.',
-                ic('Key'), g.keySrc or 'not read yet', g.hits))
-            if g.err then textc(COL.warn, g.err) end
-            if not g.on then
-                textc(COL.warn, 'The guard is off, so these are only remembered, not enforced.')
-            end
-        end
-        textc(COL.dim, 'Tracking only. This moves the marker, it does not touch quest state, and nothing here appears in Undo because there is nothing to undo.')
-    end
-    sep()
+            hint('Track the quest in your journal first, then press this. Mikoshi reads whatever your build calls it rather than guessing an id.')
 
-    -- REMOVED: force-complete of the tracked quest. It wrote a journal state
-    -- with no previous value to restore, and on this build the enum names did
-    -- not resolve, so it fell back to the community's hard-coded 3 and 2. A
-    -- wrong number there sets a quest to the wrong state permanently.
-    textc(COL.dim, 'Force-complete removed: no undo, and its enum did not resolve on this build.')
-    sep()
-
-    section('known fact fixes', 'Wrench')
-    textc(COL.dim, 'Read before write. A fix already applied on this save cannot be pressed again.')
-    textc(COL.dim, ic('Pulse') .. 'Watch puts a fact on the pinned card: press your Mikoshi key with the overlay closed, play, and see whether the game sets it on its own.')
-    for i, f in ipairs(data.facts or {}) do
-        -- Read the fact first. If it already holds the value this fix writes,
-        -- the fix is a no-op on this save, so the button is replaced by a note
-        -- rather than left there inviting a pointless write to the Undo log.
-        local cur, readOk = nil, false
-        if api.getFact then
-            local ok, v = pcall(function() return api.getFact(f.fact) end)
-            if ok then cur, readOk = v, true end
-        end
-        local applied = readOk and cur ~= nil and cur == f.value
-
-        statusIcon(applied and 'ok' or (f.verified and 'ok' or 'warn'))
-        sameAt(30); ImGui.Text(f.label)
-        if f.note then hint(f.note) end
-
-        if applied then
-            same(); textc(COL.ok, 'already set to ' .. tostring(f.value) .. ', nothing to do')
-        elseif api.setFact then
-            if readOk and cur ~= nil then
-                same(); textc(COL.dim, 'currently ' .. tostring(cur))
-            end
-            if ImGui.Button('Apply##fact' .. i) then
-                local ok, msg = setFactLogged(f.fact, f.value)
-                note((ok and 'OK  ' or 'FAIL ') .. msg)
-            end
-            same()
-            if ImGui.Button('Read##fact' .. i) then
-                note('%s = %s', f.fact, readOk and tostring(cur) or 'read failed')
-            end
-            same(); watchButton('f' .. i, f.fact)
-        else
-            textc(COL.bad, 'SetFactStr unavailable on this build, so this one cannot be written')
-            -- Watching still works without write access, and read-only is the
-            -- case where watching matters most: it is the only way left to see
-            -- whether the game is setting the fact on its own.
-            watchButton('f' .. i, f.fact)
-        end
-    end
-    sep()
-
-    -- Collapsed by default, and ImGui remembers the open state per window in
-    -- its own layout file, so once you have finished the sightings it stays
-    -- shut without the mod having to store anything.
-    local psyOpen = false
-    if caps.CollapsingHeader then
-        local ok, open = pcall(function()
-            return ImGui.CollapsingHeader(ic('AccountAlert') .. 'CYBERPSYCHO SIGHTINGS  (' ..
-                #(data.cyberpsychos or {}) .. ')')
-        end)
-        psyOpen = ok and open or false
-        if not ok then psyOpen = state.psyShow == true end
-    else
-        state.psyShow = state.psyShow == true
-        if ImGui.Button((state.psyShow and 'Hide' or 'Show') ..
-                ' the 17 cyberpsycho sightings##psytoggle') then
-            state.psyShow = not state.psyShow
-        end
-        psyOpen = state.psyShow
-    end
-
-    if psyOpen then
-        textc(COL.warn, 'Before anything else: open your shards and read the ones you already hold.')
-        hint('A sighting often stays open because a shard you already picked up was never READ. That closes more of these than any command here. The list below is a reference for finding the one you have not done.')
-        for i, p in ipairs(data.cyberpsychos or {}) do
-            ImGui.Text(p.name)
-            sameAt(260); textc(COL.dim, p.district)
-            sameAt(470); textc(COL.dim, p.id)
-        end
-    end
-    sep()
-
-    ImGui.Text('Templates')
-    for i, t in ipairs(data.templates or {}) do
-        ImGui.Text(t.label)
-        if t.note then hint(t.note) end
-        local built = t.pattern
-        for _, fld in ipairs(t.fields or {}) do
-            local key = 'tpl' .. i .. fld.key
-            state.fields[key] = state.fields[key] or ''
-            if caps.InputText then
-                local v = ImGui.InputText(fld.key .. '##' .. key, state.fields[key], 64)
-                if type(v) == 'string' then state.fields[key] = v end
+            if #g.list == 0 then
+                textc(COL.dim, 'Nothing blocked. Track Nocturne Op55N1, press the button, then track what you actually want to play.')
             else
-                ImGui.Text(fld.key .. ': ' .. state.fields[key])
+                for i = #g.list, 1, -1 do
+                    statusIcon(g.on and 'ok' or 'warn')
+                    sameAt(30); ImGui.Text(g.list[i].label or g.list[i].key)
+                    sameAt(340)
+                    if ImGui.Button('Unblock##gub' .. i) then
+                        table.remove(g.list, i); saveBlocked()
+                    end
+                end
+                textc(COL.dim, string.format('%s key read via %s. Handed focus back %d time(s) this session.',
+                    ic('Key'), g.keySrc or 'not read yet', g.hits))
+                if g.err then textc(COL.warn, g.err) end
+                if not g.on then
+                    textc(COL.warn, 'The guard is off, so these are only remembered, not enforced.')
+                end
             end
-            same(); textc(COL.dim, fld.hint or '')
-            built = built:gsub('{' .. fld.key .. '}', state.fields[key])
-        end
-        textc(COL.dim, 'will set: ' .. built .. ' = ' .. tostring(t.value))
-        local complete = not built:find('{')
-        if complete and api.setFact then
-            if ImGui.Button('Apply##tpl' .. i) then
-                local ok, msg = setFactLogged(built, t.value)
-                note((ok and 'OK  ' or 'FAIL ') .. msg)
-            end
-        else
-            textc(COL.dim, 'fill every field to enable')
+            textc(COL.dim, 'Tracking only. This moves the marker, it does not touch quest state, and nothing here appears in Undo because there is nothing to undo.')
         end
         sep()
+
+        -- REMOVED: force-complete of the tracked quest. It wrote a journal state
+        -- with no previous value to restore, and on this build the enum names did
+        -- not resolve, so it fell back to the community's hard-coded 3 and 2. A
+        -- wrong number there sets a quest to the wrong state permanently.
+        textc(COL.dim, 'Force-complete removed: no undo, and its enum did not resolve on this build.')
+        sep()
+    end
+
+    if section('known fact fixes', 'Wrench') then
+        textc(COL.dim, 'Read before write. A fix already applied on this save cannot be pressed again.')
+        textc(COL.dim, ic('Pulse') .. 'Watch puts a fact on the pinned card: press your Mikoshi key with the overlay closed, play, and see whether the game sets it on its own.')
+        for i, f in ipairs(data.facts or {}) do
+            -- Read the fact first. If it already holds the value this fix writes,
+            -- the fix is a no-op on this save, so the button is replaced by a note
+            -- rather than left there inviting a pointless write to the Undo log.
+            local cur, readOk = nil, false
+            if api.getFact then
+                local ok, v = pcall(function() return api.getFact(f.fact) end)
+                if ok then cur, readOk = v, true end
+            end
+            local applied = readOk and cur ~= nil and cur == f.value
+
+            statusIcon(applied and 'ok' or (f.verified and 'ok' or 'warn'))
+            sameAt(30); ImGui.Text(f.label)
+            if f.note then hint(f.note) end
+
+            if applied then
+                same(); textc(COL.ok, 'already set to ' .. tostring(f.value) .. ', nothing to do')
+            elseif api.setFact then
+                if readOk and cur ~= nil then
+                    same(); textc(COL.dim, 'currently ' .. tostring(cur))
+                end
+                if ImGui.Button('Apply##fact' .. i) then
+                    local ok, msg = setFactLogged(f.fact, f.value)
+                    note((ok and 'OK  ' or 'FAIL ') .. msg)
+                end
+                same()
+                if ImGui.Button('Read##fact' .. i) then
+                    note('%s = %s', f.fact, readOk and tostring(cur) or 'read failed')
+                end
+                same(); watchButton('f' .. i, f.fact)
+            else
+                textc(COL.bad, 'SetFactStr unavailable on this build, so this one cannot be written')
+                -- Watching still works without write access, and read-only is the
+                -- case where watching matters most: it is the only way left to see
+                -- whether the game is setting the fact on its own.
+                watchButton('f' .. i, f.fact)
+            end
+        end
+        sep()
+
+        -- Collapsed by default, and ImGui remembers the open state per window in
+        -- its own layout file, so once you have finished the sightings it stays
+        -- shut without the mod having to store anything.
+        local psyOpen = false
+        if caps.CollapsingHeader then
+            local ok, open = pcall(function()
+                return ImGui.CollapsingHeader(ic('AccountAlert') .. 'CYBERPSYCHO SIGHTINGS  (' ..
+                    #(data.cyberpsychos or {}) .. ')')
+            end)
+            psyOpen = ok and open or false
+            if not ok then psyOpen = state.psyShow == true end
+        else
+            state.psyShow = state.psyShow == true
+            if ImGui.Button((state.psyShow and 'Hide' or 'Show') ..
+                    ' the 17 cyberpsycho sightings##psytoggle') then
+                state.psyShow = not state.psyShow
+            end
+            psyOpen = state.psyShow
+        end
+
+        if psyOpen then
+            textc(COL.warn, 'Before anything else: open your shards and read the ones you already hold.')
+            hint('A sighting often stays open because a shard you already picked up was never READ. That closes more of these than any command here. The list below is a reference for finding the one you have not done.')
+            for i, p in ipairs(data.cyberpsychos or {}) do
+                ImGui.Text(p.name)
+                sameAt(260); textc(COL.dim, p.district)
+                sameAt(470); textc(COL.dim, p.id)
+            end
+        end
+        sep()
+
+        ImGui.Text('Templates')
+        for i, t in ipairs(data.templates or {}) do
+            ImGui.Text(t.label)
+            if t.note then hint(t.note) end
+            local built = t.pattern
+            for _, fld in ipairs(t.fields or {}) do
+                local key = 'tpl' .. i .. fld.key
+                state.fields[key] = state.fields[key] or ''
+                if caps.InputText then
+                    local v = ImGui.InputText(fld.key .. '##' .. key, state.fields[key], 64)
+                    if type(v) == 'string' then state.fields[key] = v end
+                else
+                    ImGui.Text(fld.key .. ': ' .. state.fields[key])
+                end
+                same(); textc(COL.dim, fld.hint or '')
+                built = built:gsub('{' .. fld.key .. '}', state.fields[key])
+            end
+            textc(COL.dim, 'will set: ' .. built .. ' = ' .. tostring(t.value))
+            local complete = not built:find('{')
+            if complete and api.setFact then
+                if ImGui.Button('Apply##tpl' .. i) then
+                    local ok, msg = setFactLogged(built, t.value)
+                    note((ok and 'OK  ' or 'FAIL ') .. msg)
+                end
+            else
+                textc(COL.dim, 'fill every field to enable')
+            end
+            sep()
+        end
     end
 end
 
@@ -1536,321 +1635,334 @@ local function tabShards()
 end
 
 local function tabInventory()
-    section('eddies and points')
-    for i, e in ipairs(data.everyday or {}) do
-        grantRow('day' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
-    end
-
-    section('experience')
-    textc(COL.dim, 'These are function calls, not items, so there is no record to pre-check. The value is read before and after instead, and what you get told is the difference.')
-    for i, e in ipairs(data.exp or {}) do
-        local cur = readAttribute(e.arg)
-        ImGui.Text(e.label)
-        sameAt(150); textc(cur and COL.cyan or COL.dim,
-                           cur and tostring(cur) or 'cannot read this one')
-        sameAt(260, 150)
-        local qty = amountBox('exp' .. i, e.default, e.step)
-        same()
-        if ImGui.Button(('Add %d##exp%d'):format(qty, i)) then
-            local ok, msg = addExperience(e.arg, qty)
-            note((ok and 'OK  ' or 'FAIL ') .. msg)
+    if section('eddies and points') then
+        for i, e in ipairs(data.everyday or {}) do
+            grantRow('day' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
         end
     end
-    sep()
 
-    section('ammo')
-    for i, e in ipairs(data.ammo or {}) do
-        grantRow('ammo' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+    if section('experience') then
+        textc(COL.dim, 'These are function calls, not items, so there is no record to pre-check. The value is read before and after instead, and what you get told is the difference.')
+        for i, e in ipairs(data.exp or {}) do
+            local cur = readAttribute(e.arg)
+            ImGui.Text(e.label)
+            sameAt(150); textc(cur and COL.cyan or COL.dim,
+                               cur and tostring(cur) or 'cannot read this one')
+            sameAt(260, 150)
+            local qty = amountBox('exp' .. i, e.default, e.step)
+            same()
+            if ImGui.Button(('Add %d##exp%d'):format(qty, i)) then
+                local ok, msg = addExperience(e.arg, qty)
+                note((ok and 'OK  ' or 'FAIL ') .. msg)
+            end
+        end
+        sep()
     end
 
-    section('consumables')
-    for i, e in ipairs(data.healing or {}) do
-        grantRow('heal' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+    if section('ammo') then
+        for i, e in ipairs(data.ammo or {}) do
+            grantRow('ammo' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+        end
     end
 
-    section('iconics', 'Star')
-    for i, e in ipairs(data.iconics or {}) do
-        grantRow('icon' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+    if section('consumables') then
+        for i, e in ipairs(data.healing or {}) do
+            grantRow('heal' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+        end
     end
 
-    section('crafting materials')
-    for i, e in ipairs(data.crafting or {}) do
-        grantRow('craft' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+    if section('iconics', 'Star') then
+        for i, e in ipairs(data.iconics or {}) do
+            grantRow('icon' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+        end
+    end
+
+    if section('crafting materials') then
+        for i, e in ipairs(data.crafting or {}) do
+            grantRow('craft' .. i, e.label, e.record, e.default, e.step, e.note, e.loop)
+        end
     end
 end
 
 local function tabWorld()
-    section('time of day')
-    if ACTIONS.time.probe() then
-        if state.amounts.hour == nil then state.amounts.hour = 12 end
-        local h = amountBox('hour', 12, 1)
-        if h < 0 then h = 0 elseif h > 23 then h = 23 end
-        state.amounts.hour = h
-        same()
-        if ImGui.Button(('Set %02d:00##time'):format(h)) then
-            local ok = ACTIONS.time.run(h)
-            note(ok and ('OK  clock set to %02d:00'):format(h) or 'FAIL the time system refused')
-        end
-    else
-        textc(COL.bad, ACTIONS.time.needs .. ' is not available on this build')
-    end
-    sep()
-
-    section('weather')
-    if ACTIONS.weather.probe() then
-        -- The eight names shipped here were community guesses and the official
-        -- wiki documents no weather commands at all. So ask the game for the
-        -- real record ids instead, the same way Browse does.
-        if state.weather == nil then
-            -- Try every type and keep the richest, instead of stopping at the
-            -- first that answers at all. gamedataWeather_Record returns two
-            -- records on 2.5, so breaking on "more than zero" settled for two
-            -- weather states when the state list is the other type.
-            local found = {}
-            for _, t in ipairs({ 'gamedataWeatherState_Record', 'gamedataWeather_Record',
-                                 'gamedataEnvironmentAreaType_Record' }) do
-                local got = {}
-                local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
-                if ok and recs then
-                    pcall(function()
-                        for _, r in ipairs(recs) do
-                            local n = recordName(r)
-                            if n then got[#got + 1] = n end
-                        end
-                    end)
-                end
-                if #got > #found then found, state.weatherType = got, t end
-            end
-            table.sort(found)
-            state.weather = found
-            note('weather records found: %d%s', #found,
-                state.weatherType and (' via ' .. state.weatherType) or ' (falling back to guessed names)')
-        end
-
-        local live = #state.weather > 0
-        if live then
-            textc(COL.ok, ('%d real state ids read from your install'):format(#state.weather))
-        else
-            textc(COL.warn, 'No weather records found. These names are unverified guesses.')
-        end
-
-        local list = live and state.weather or nil
-        if list then
-            for i = 1, math.min(#list, 24) do
-                if i > 1 and (i % 2) ~= 1 then same() end
-                if ImGui.Button(list[i] .. '##wl' .. i) then
-                    local ok, res = ACTIONS.weather.run(list[i])
-                    note(verdict('weather -> ' .. list[i], ok, res,
-                        'Give it the ten second transition before deciding it failed.'))
-                end
-            end
-        else
-            for i, w in ipairs(data.weather or {}) do
-                if i > 1 and (i % 3) ~= 1 then same() end
-                if ImGui.Button(w.label .. '##w' .. i) then
-                    local ok, res = ACTIONS.weather.run(w.state)
-                    note(verdict('weather -> ' .. w.state, ok, res, nil))
-                end
-            end
-        end
-
-        if ImGui.Button('Dump the weather system to the log##dumpws') then
-            local ok, out = pcall(function() return Dump(Game.GetWeatherSystem(), false) end)
-            if ok then
-                print('[Mikoshi] weather system dump follows'); print(tostring(out))
-                note('OK  dumped the weather system. Check the console for the real method names.')
-            else
-                note('FAIL Dump refused: ' .. tostring(out))
-            end
-        end
-    else
-        textc(COL.bad, ACTIONS.weather.needs .. ' is not available on this build')
-    end
-    sep()
-
-    section('stuck in the world')
-    wrapped('Lifts V two metres straight up. For falling through geometry or wedging in a doorway, which is cheaper than reloading a save.')
-    if ACTIONS.unstuck.probe() then
-        if ImGui.Button('Nudge V upward##unstuck') then
-            local ok = ACTIONS.unstuck.run()
-            note(ok and 'OK  teleported two metres up' or 'FAIL teleport refused')
-        end
-    else
-        textc(COL.bad, ACTIONS.unstuck.needs .. ' is not available on this build')
-    end
-    sep()
-
-    section('teleport', 'MapMarker')
-    if ACTIONS.teleport.probe() then
-        wrapped('Save where you are BEFORE you jump. Some destinations are sealed areas you cannot walk out of, which is the wiki\'s warning rather than mine.')
-        if ImGui.Button('Read where I am now##tpread') then
-            local ok, p = pcall(function() return Game.GetPlayer():GetWorldPosition() end)
-            local x, y, z
-            if ok and p then pcall(function() x, y, z = p.x, p.y, p.z end) end
-            if x then
-                state.tp.cur = { x = x, y = y, z = z }
-                state.tp.text = string.format('%.4f, %.4f, %.4f', x, y, z)
-                note('position: %s', state.tp.text)
-            else
-                note('FAIL could not read your position')
-            end
-        end
-        same()
-        if ImGui.Button('Save it as a waypoint##tpsave') then
-            local p = state.tp.cur
-            if p then
-                local nm = (state.tp.name ~= '' and state.tp.name)
-                        or ('waypoint ' .. (#state.tp.saved + 1))
-                table.insert(state.tp.saved, 1, { name = nm, x = p.x, y = p.y, z = p.z })
-                state.tp.name = ''
-                note('saved "%s"', nm)
-            else
-                note('Read your position first.')
-            end
-        end
-        if caps.InputText then
-            local nv = ImGui.InputText('name##tpn', state.tp.name, 48)
-            if type(nv) == 'string' then state.tp.name = nv end
-            local cv = ImGui.InputText('x, y, z##tpc', state.tp.text, 96)
-            if type(cv) == 'string' then state.tp.text = cv end
-        end
-        if ImGui.Button('Teleport to those coordinates##tpgo') then
-            local x, y, z = state.tp.text:match('(-?[%d%.]+)%s*,%s*(-?[%d%.]+)%s*,%s*(-?[%d%.]+)')
-            if x then
-                local ok, res = ACTIONS.teleport.run(tonumber(x), tonumber(y), tonumber(z))
-                note(verdict('teleport', ok, res, 'Give the area a second to stream in.'))
-            else
-                note('FAIL could not read three numbers out of that box')
-            end
-        end
-
-        if #state.tp.saved > 0 then
-            textc(COL.dim, 'your waypoints')
-            for i = 1, #state.tp.saved do
-                local s = state.tp.saved[i]
-                ImGui.Text(string.format('%s  (%.0f, %.0f, %.0f)', s.name, s.x, s.y, s.z))
-                same()
-                if ImGui.Button('Go##tpg' .. i) then
-                    local ok, res = ACTIONS.teleport.run(s.x, s.y, s.z)
-                    note(verdict('teleport to ' .. s.name, ok, res, nil))
-                end
-                same()
-                if ImGui.Button('Forget##tpf' .. i) then table.remove(state.tp.saved, i); break end
-            end
-        end
-
-        -- Interlock, not advice. Some of these are sealed interiors you cannot
-        -- walk out of, so the jump stays disabled until a waypoint exists to
-        -- come back to. That is the one way teleport can break a run.
-        textc(COL.dim, 'known places, coordinates from the wiki')
-        local haveReturn = #state.tp.saved > 0
-        if not haveReturn then
-            statusIcon('warn')
-            sameAt(30)
-            textc(COL.warn, 'Save a waypoint first. Several of these cannot be left on foot.')
-        end
-        for i, pl in ipairs(data.places or {}) do
-            if haveReturn then
-                if ImGui.Button(pl.label .. '##tpp' .. i, -1, 0) then
-                    local ok, res = ACTIONS.teleport.run(pl.x, pl.y, pl.z)
-                    note(verdict('teleport to ' .. pl.label, ok, res,
-                        'Use a waypoint to get back if you are stuck.'))
-                end
-            else
-                textc(COL.dim, '   ' .. pl.label)
-            end
-        end
-    else
-        textc(COL.bad, ACTIONS.teleport.needs .. ' is not available on this build')
-    end
-    sep()
-
-    section('attributes', 'ArmFlex')
-    if ACTIONS.setAttribute.probe() then
-        textc(COL.dim, 'Current value on the left. The box is what a button will set it TO.')
-        local n = amountBox('attrv', 15, 1)
-        same(); textc(COL.dim, 'set to this')
-        local anyRead = false
-        for i, a in ipairs(data.attributes or {}) do
-            local cur = readAttribute(a.arg)
-            if cur then anyRead = true end
-            statusIcon(cur and 'ok' or 'warn')
-            sameAt(30);  ImGui.Text(a.label)
-            sameAt(190); textc(cur and COL.cyan or COL.dim,
-                               cur and tostring(cur) or 'could not read')
-            sameAt(250)
-            -- The button says the number, so there is no way to press it
-            -- thinking it does something else.
-            if ImGui.Button(('Set to %d##at%d'):format(n, i)) then
-                local ok, res = ACTIONS.setAttribute.run(a.arg, n)
-                note(verdict(('%s %s -> %d'):format(a.label, tostring(cur or '?'), n), ok, res,
-                    a.verified and '' or 'This attribute name is inferred, not documented.'))
-            end
-        end
-        if anyRead then
-            textc(COL.dim, ic('Eye') .. 'read via ' .. (state.attrSrc or 'unknown'))
-        else
-            textc(COL.warn, 'None of the three read routes answered on this build, so the values above are unknown rather than zero.')
-        end
-        textc(COL.dim, 'Only Body (Strength) has a documented internal name. The other four are inferred.')
-    else
-        textc(COL.bad, ACTIONS.setAttribute.needs .. ' is not available on this build')
-    end
-    sep()
-    section('character level')
-    if ACTIONS.setLevel.probe() then
-        local n = amountBox('lvl', 50, 1)
-        same()
-        if ImGui.Button('Set level##lvl') then
-            local ok = ACTIONS.setLevel.run(n)
-            note(ok and ('OK  level set to %d'):format(n) or 'FAIL Game.SetLevel refused')
-        end
-        textc(COL.dim, 'Street cred through this call is undocumented, so it is not offered here.')
-    else
-        textc(COL.bad, ACTIONS.setLevel.needs .. ' is not available on this build')
-    end
-    sep()
-
-    section('perk and attribute points')
-    if ACTIONS.devPoints.probe() then
-        local n = amountBox('dev', 5, 1)
-        same()
-        if ImGui.Button('Perk points##perk') then
-            local ok, got = ACTIONS.devPoints.run(n, 'Primary')
-            note(ok and ('OK  added %d of %d perk point(s)'):format(got, n)
-                    or 'FAIL the development system refused')
-        end
-        same()
-        if ImGui.Button('Attribute points##attr') then
-            local ok, got = ACTIONS.devPoints.run(n, 'Attribute')
-            note(ok and ('OK  added %d of %d attribute point(s)'):format(got, n)
-                    or 'FAIL the development system refused')
-        end
-
-        -- Relic points. There is no skillbook for these on 2.5 -- the item id
-        -- that used to be here is not in TweakDB at all -- so they come from
-        -- the same development system as the other two. The enum member is
-        -- looked up by name first, because the one thing worse than no button
-        -- is a button that quietly adds the wrong kind of point.
-        local relicKind
-        for _, k in ipairs({ 'Relic', 'Espionage', 'Primary_Relic' }) do
-            local okk, v = pcall(function() return gamedataDevelopmentPointType[k] end)
-            if okk and v ~= nil then relicKind = k; break end
-        end
-        if relicKind then
+    if section('time of day') then
+        if ACTIONS.time.probe() then
+            if state.amounts.hour == nil then state.amounts.hour = 12 end
+            local h = amountBox('hour', 12, 1)
+            if h < 0 then h = 0 elseif h > 23 then h = 23 end
+            state.amounts.hour = h
             same()
-            if ImGui.Button('Relic points##relic') then
-                local ok, got = ACTIONS.devPoints.run(n, relicKind)
-                note(ok and ('OK  added %d of %d relic point(s) as %s'):format(got, n, relicKind)
-                        or 'FAIL the development system refused ' .. relicKind)
+            if ImGui.Button(('Set %02d:00##time'):format(h)) then
+                local ok = ACTIONS.time.run(h)
+                note(ok and ('OK  clock set to %02d:00'):format(h) or 'FAIL the time system refused')
             end
-            hint('Uses gamedataDevelopmentPointType.' .. relicKind
-                 .. ', found on this build. Relic points are Phantom Liberty content, so this does nothing without it.')
         else
-            textc(COL.dim, 'Relic points: no matching member of gamedataDevelopmentPointType on this build, so there is no safe call to make.')
+            textc(COL.bad, ACTIONS.time.needs .. ' is not available on this build')
         end
-    else
-        textc(COL.bad, ACTIONS.devPoints.needs .. ' is not available on this build')
+        sep()
+    end
+
+    if section('weather') then
+        if ACTIONS.weather.probe() then
+            -- The eight names shipped here were community guesses and the official
+            -- wiki documents no weather commands at all. So ask the game for the
+            -- real record ids instead, the same way Browse does.
+            if state.weather == nil then
+                -- Try every type and keep the richest, instead of stopping at the
+                -- first that answers at all. gamedataWeather_Record returns two
+                -- records on 2.5, so breaking on "more than zero" settled for two
+                -- weather states when the state list is the other type.
+                local found = {}
+                for _, t in ipairs({ 'gamedataWeatherState_Record', 'gamedataWeather_Record',
+                                     'gamedataEnvironmentAreaType_Record' }) do
+                    local got = {}
+                    local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
+                    if ok and recs then
+                        pcall(function()
+                            for _, r in ipairs(recs) do
+                                local n = recordName(r)
+                                if n then got[#got + 1] = n end
+                            end
+                        end)
+                    end
+                    if #got > #found then found, state.weatherType = got, t end
+                end
+                table.sort(found)
+                state.weather = found
+                note('weather records found: %d%s', #found,
+                    state.weatherType and (' via ' .. state.weatherType) or ' (falling back to guessed names)')
+            end
+
+            local live = #state.weather > 0
+            if live then
+                textc(COL.ok, ('%d real state ids read from your install'):format(#state.weather))
+            else
+                textc(COL.warn, 'No weather records found. These names are unverified guesses.')
+            end
+
+            local list = live and state.weather or nil
+            if list then
+                for i = 1, math.min(#list, 24) do
+                    if i > 1 and (i % 2) ~= 1 then same() end
+                    if ImGui.Button(list[i] .. '##wl' .. i) then
+                        local ok, res = ACTIONS.weather.run(list[i])
+                        note(verdict('weather -> ' .. list[i], ok, res,
+                            'Give it the ten second transition before deciding it failed.'))
+                    end
+                end
+            else
+                for i, w in ipairs(data.weather or {}) do
+                    if i > 1 and (i % 3) ~= 1 then same() end
+                    if ImGui.Button(w.label .. '##w' .. i) then
+                        local ok, res = ACTIONS.weather.run(w.state)
+                        note(verdict('weather -> ' .. w.state, ok, res, nil))
+                    end
+                end
+            end
+
+            if ImGui.Button('Dump the weather system to the log##dumpws') then
+                local ok, out = pcall(function() return Dump(Game.GetWeatherSystem(), false) end)
+                if ok then
+                    print('[Mikoshi] weather system dump follows'); print(tostring(out))
+                    note('OK  dumped the weather system. Check the console for the real method names.')
+                else
+                    note('FAIL Dump refused: ' .. tostring(out))
+                end
+            end
+        else
+            textc(COL.bad, ACTIONS.weather.needs .. ' is not available on this build')
+        end
+        sep()
+    end
+
+    if section('stuck in the world') then
+        wrapped('Lifts V two metres straight up. For falling through geometry or wedging in a doorway, which is cheaper than reloading a save.')
+        if ACTIONS.unstuck.probe() then
+            if ImGui.Button('Nudge V upward##unstuck') then
+                local ok = ACTIONS.unstuck.run()
+                note(ok and 'OK  teleported two metres up' or 'FAIL teleport refused')
+            end
+        else
+            textc(COL.bad, ACTIONS.unstuck.needs .. ' is not available on this build')
+        end
+        sep()
+    end
+
+    if section('teleport', 'MapMarker') then
+        if ACTIONS.teleport.probe() then
+            wrapped('Save where you are BEFORE you jump. Some destinations are sealed areas you cannot walk out of, which is the wiki\'s warning rather than mine.')
+            if ImGui.Button('Read where I am now##tpread') then
+                local ok, p = pcall(function() return Game.GetPlayer():GetWorldPosition() end)
+                local x, y, z
+                if ok and p then pcall(function() x, y, z = p.x, p.y, p.z end) end
+                if x then
+                    state.tp.cur = { x = x, y = y, z = z }
+                    state.tp.text = string.format('%.4f, %.4f, %.4f', x, y, z)
+                    note('position: %s', state.tp.text)
+                else
+                    note('FAIL could not read your position')
+                end
+            end
+            same()
+            if ImGui.Button('Save it as a waypoint##tpsave') then
+                local p = state.tp.cur
+                if p then
+                    local nm = (state.tp.name ~= '' and state.tp.name)
+                            or ('waypoint ' .. (#state.tp.saved + 1))
+                    table.insert(state.tp.saved, 1, { name = nm, x = p.x, y = p.y, z = p.z })
+                    state.tp.name = ''
+                    note('saved "%s"', nm)
+                else
+                    note('Read your position first.')
+                end
+            end
+            if caps.InputText then
+                local nv = ImGui.InputText('name##tpn', state.tp.name, 48)
+                if type(nv) == 'string' then state.tp.name = nv end
+                local cv = ImGui.InputText('x, y, z##tpc', state.tp.text, 96)
+                if type(cv) == 'string' then state.tp.text = cv end
+            end
+            if ImGui.Button('Teleport to those coordinates##tpgo') then
+                local x, y, z = state.tp.text:match('(-?[%d%.]+)%s*,%s*(-?[%d%.]+)%s*,%s*(-?[%d%.]+)')
+                if x then
+                    local ok, res = ACTIONS.teleport.run(tonumber(x), tonumber(y), tonumber(z))
+                    note(verdict('teleport', ok, res, 'Give the area a second to stream in.'))
+                else
+                    note('FAIL could not read three numbers out of that box')
+                end
+            end
+
+            if #state.tp.saved > 0 then
+                textc(COL.dim, 'your waypoints')
+                for i = 1, #state.tp.saved do
+                    local s = state.tp.saved[i]
+                    ImGui.Text(string.format('%s  (%.0f, %.0f, %.0f)', s.name, s.x, s.y, s.z))
+                    same()
+                    if ImGui.Button('Go##tpg' .. i) then
+                        local ok, res = ACTIONS.teleport.run(s.x, s.y, s.z)
+                        note(verdict('teleport to ' .. s.name, ok, res, nil))
+                    end
+                    same()
+                    if ImGui.Button('Forget##tpf' .. i) then table.remove(state.tp.saved, i); break end
+                end
+            end
+
+            -- Interlock, not advice. Some of these are sealed interiors you cannot
+            -- walk out of, so the jump stays disabled until a waypoint exists to
+            -- come back to. That is the one way teleport can break a run.
+            textc(COL.dim, 'known places, coordinates from the wiki')
+            local haveReturn = #state.tp.saved > 0
+            if not haveReturn then
+                statusIcon('warn')
+                sameAt(30)
+                textc(COL.warn, 'Save a waypoint first. Several of these cannot be left on foot.')
+            end
+            for i, pl in ipairs(data.places or {}) do
+                if haveReturn then
+                    if ImGui.Button(pl.label .. '##tpp' .. i, -1, 0) then
+                        local ok, res = ACTIONS.teleport.run(pl.x, pl.y, pl.z)
+                        note(verdict('teleport to ' .. pl.label, ok, res,
+                            'Use a waypoint to get back if you are stuck.'))
+                    end
+                else
+                    textc(COL.dim, '   ' .. pl.label)
+                end
+            end
+        else
+            textc(COL.bad, ACTIONS.teleport.needs .. ' is not available on this build')
+        end
+        sep()
+    end
+
+    if section('attributes', 'ArmFlex') then
+        if ACTIONS.setAttribute.probe() then
+            textc(COL.dim, 'Current value on the left. The box is what a button will set it TO.')
+            local n = amountBox('attrv', 15, 1)
+            same(); textc(COL.dim, 'set to this')
+            local anyRead = false
+            for i, a in ipairs(data.attributes or {}) do
+                local cur = readAttribute(a.arg)
+                if cur then anyRead = true end
+                statusIcon(cur and 'ok' or 'warn')
+                sameAt(30);  ImGui.Text(a.label)
+                sameAt(190); textc(cur and COL.cyan or COL.dim,
+                                   cur and tostring(cur) or 'could not read')
+                sameAt(250)
+                -- The button says the number, so there is no way to press it
+                -- thinking it does something else.
+                if ImGui.Button(('Set to %d##at%d'):format(n, i)) then
+                    local ok, res = ACTIONS.setAttribute.run(a.arg, n)
+                    note(verdict(('%s %s -> %d'):format(a.label, tostring(cur or '?'), n), ok, res,
+                        a.verified and '' or 'This attribute name is inferred, not documented.'))
+                end
+            end
+            if anyRead then
+                textc(COL.dim, ic('Eye') .. 'read via ' .. (state.attrSrc or 'unknown'))
+            else
+                textc(COL.warn, 'None of the three read routes answered on this build, so the values above are unknown rather than zero.')
+            end
+            textc(COL.dim, 'Only Body (Strength) has a documented internal name. The other four are inferred.')
+        else
+            textc(COL.bad, ACTIONS.setAttribute.needs .. ' is not available on this build')
+        end
+        sep()
+    end
+    if section('character level') then
+        if ACTIONS.setLevel.probe() then
+            local n = amountBox('lvl', 50, 1)
+            same()
+            if ImGui.Button('Set level##lvl') then
+                local ok = ACTIONS.setLevel.run(n)
+                note(ok and ('OK  level set to %d'):format(n) or 'FAIL Game.SetLevel refused')
+            end
+            textc(COL.dim, 'Street cred through this call is undocumented, so it is not offered here.')
+        else
+            textc(COL.bad, ACTIONS.setLevel.needs .. ' is not available on this build')
+        end
+        sep()
+    end
+
+    if section('perk and attribute points') then
+        if ACTIONS.devPoints.probe() then
+            local n = amountBox('dev', 5, 1)
+            same()
+            if ImGui.Button('Perk points##perk') then
+                local ok, got = ACTIONS.devPoints.run(n, 'Primary')
+                note(ok and ('OK  added %d of %d perk point(s)'):format(got, n)
+                        or 'FAIL the development system refused')
+            end
+            same()
+            if ImGui.Button('Attribute points##attr') then
+                local ok, got = ACTIONS.devPoints.run(n, 'Attribute')
+                note(ok and ('OK  added %d of %d attribute point(s)'):format(got, n)
+                        or 'FAIL the development system refused')
+            end
+
+            -- Relic points. There is no skillbook for these on 2.5 -- the item id
+            -- that used to be here is not in TweakDB at all -- so they come from
+            -- the same development system as the other two. The enum member is
+            -- looked up by name first, because the one thing worse than no button
+            -- is a button that quietly adds the wrong kind of point.
+            local relicKind
+            for _, k in ipairs({ 'Relic', 'Espionage', 'Primary_Relic' }) do
+                local okk, v = pcall(function() return gamedataDevelopmentPointType[k] end)
+                if okk and v ~= nil then relicKind = k; break end
+            end
+            if relicKind then
+                same()
+                if ImGui.Button('Relic points##relic') then
+                    local ok, got = ACTIONS.devPoints.run(n, relicKind)
+                    note(ok and ('OK  added %d of %d relic point(s) as %s'):format(got, n, relicKind)
+                            or 'FAIL the development system refused ' .. relicKind)
+                end
+                hint('Uses gamedataDevelopmentPointType.' .. relicKind
+                     .. ', found on this build. Relic points are Phantom Liberty content, so this does nothing without it.')
+            else
+                textc(COL.dim, 'Relic points: no matching member of gamedataDevelopmentPointType on this build, so there is no safe call to make.')
+            end
+        else
+            textc(COL.bad, ACTIONS.devPoints.needs .. ' is not available on this build')
+        end
     end
 end
 
@@ -1941,7 +2053,7 @@ local function localise(v)
     return nil
 end
 
-local function describe(id)
+function describe(id)
     if descCache[id] then return descCache[id] end
     local function flat(suffix)
         local ok, v = pcall(function() return TweakDB:GetFlat(id .. suffix) end)
@@ -2152,16 +2264,22 @@ local function findLike(id)
 end
 
 local function tabBrowse()
-    section('source')
-    if state.browse.idx == 3 then
-        textc(COL.warn, 'Vehicle prefixes: v_ is a ground vehicle, av_ is an aerial one used in scripted scenes. An av_ will not appear even when the call accepts it.')
+    if section('source') then
+        if state.browse.idx == 3 then
+            textc(COL.warn, 'Vehicle prefixes: v_ is a ground vehicle, av_ is an aerial one used in scripted scenes. An av_ will not appear even when the call accepts it.')
+        end
+        for i = 1, #BROWSE do
+            if i > 1 then same() end
+            if ImGui.Button(BROWSE[i].label .. '##bt' .. i) then state.browse.idx = i end
+        end
+        sep()
     end
-    for i = 1, #BROWSE do
-        if i > 1 then same() end
-        if ImGui.Button(BROWSE[i].label .. '##bt' .. i) then state.browse.idx = i end
-    end
-    sep()
 
+    -- Deliberately OUTSIDE the fold above. The search section below reads
+    -- these, and these guards decide whether there is anything to search at
+    -- all. Folding a header has to hide that section, not quietly disable the
+    -- rest of the tab -- which is what happened when the fold was wrapped
+    -- around them: cache went out of scope and resolved as a nil global.
     local i = state.browse.idx
     local b, cache = BROWSE[i], state.browse.cache[i]
 
@@ -2177,94 +2295,95 @@ local function tabBrowse()
         return
     end
 
-    section('search')
-    if caps.InputText then
-        local v = ImGui.InputText('##bq', state.browse.q, 64)
-        if type(v) == 'string' then state.browse.q = v end
-    end
-    same()
-    if ImGui.Button('Clear##bq') then state.browse.q = '' end
-    same()
-    state.browse.desc = ImGui.Checkbox('readable names', state.browse.desc)
+    if section('search') then
+        if caps.InputText then
+            local v = ImGui.InputText('##bq', state.browse.q, 64)
+            if type(v) == 'string' then state.browse.q = v end
+        end
+        same()
+        if ImGui.Button('Clear##bq') then state.browse.q = '' end
+        same()
+        state.browse.desc = ImGui.Checkbox('readable names', state.browse.desc)
 
-    local wasFiltered = state.browse.playableOnly
-    state.browse.playableOnly = ImGui.Checkbox('obtainable by V only', state.browse.playableOnly)
-    -- Keyed on "have we tried", not on "is there a result". The filter is now
-    -- allowed to come back with nothing usable, and keying on the result meant
-    -- that outcome re-swept 2074 records, with a TweakDB:GetFlat on each, on
-    -- every frame the tab was open.
-    if state.browse.playableOnly and (not cache.playableTried or wasFiltered ~= true) then
-        computePlayable(i)
-    end
+        local wasFiltered = state.browse.playableOnly
+        state.browse.playableOnly = ImGui.Checkbox('obtainable by V only', state.browse.playableOnly)
+        -- Keyed on "have we tried", not on "is there a result". The filter is now
+        -- allowed to come back with nothing usable, and keying on the result meant
+        -- that outcome re-swept 2074 records, with a TweakDB:GetFlat on each, on
+        -- every frame the tab was open.
+        if state.browse.playableOnly and (not cache.playableTried or wasFiltered ~= true) then
+            computePlayable(i)
+        end
 
-    -- The filtered list is what we page through when the box is ticked.
-    local list = (state.browse.playableOnly and cache.playable) or cache.names
-    if cache.filterBroke then
-        textc(COL.warn, ic('AlertCircle') .. cache.filterBroke)
-    elseif state.browse.playableOnly and cache.playable then
-        textc(COL.dim, ('%d shown, %d hidden as NPC, debug or scene-only.')
-            :format(#cache.playable, #cache.names - #cache.playable))
-    else
-        textc(COL.warn, ('Unfiltered: all %d records, most of which V cannot have.'):format(#cache.names))
-    end
-    if state.browse.desc and not cache.resolved then
-        if ImGui.Button('Match search against names too##resolve') then resolveAll(i) end
-    end
-    sep()
+        -- The filtered list is what we page through when the box is ticked.
+        local list = (state.browse.playableOnly and cache.playable) or cache.names
+        if cache.filterBroke then
+            textc(COL.warn, ic('AlertCircle') .. cache.filterBroke)
+        elseif state.browse.playableOnly and cache.playable then
+            textc(COL.dim, ('%d shown, %d hidden as NPC, debug or scene-only.')
+                :format(#cache.playable, #cache.names - #cache.playable))
+        else
+            textc(COL.warn, ('Unfiltered: all %d records, most of which V cannot have.'):format(#cache.names))
+        end
+        if state.browse.desc and not cache.resolved then
+            if ImGui.Button('Match search against names too##resolve') then resolveAll(i) end
+        end
+        sep()
 
-    local q, shown, matches = state.browse.q:lower(), 0, 0
-    for n = 1, #list do
-        local name = list[n]
-        local d = state.browse.desc and describe(name) or nil
-        local hit = q == '' or name:lower():find(q, 1, true)
-                 or (d and d.name and d.name:lower():find(q, 1, true)) and true or false
-        if hit then
-            matches = matches + 1
-            if shown < 40 then
-                shown = shown + 1
-                -- Readable name first when we have one, raw id underneath,
-                -- because the id is what the Give button actually sends.
-                if d and d.name then
-                    ImGui.Text(d.name)
-                    if d.quality then same(); textc(qualityCol(d.quality), '[' .. d.quality .. ']') end
-                    textc(COL.dim, name)
-                    if d.desc then textc(COL.dim, d.desc) end
-                else
-                    ImGui.Text(name)
-                end
-                if b.give == 'item' then
-                    if ImGui.Button('Give##b' .. n) then
-                        local ok, msg = giveItem(name, 1)
-                        note((ok and 'OK  ' or 'FAIL ') .. msg)
+        local q, shown, matches = state.browse.q:lower(), 0, 0
+        for n = 1, #list do
+            local name = list[n]
+            local d = state.browse.desc and describe(name) or nil
+            local hit = q == '' or name:lower():find(q, 1, true)
+                     or (d and d.name and d.name:lower():find(q, 1, true)) and true or false
+            if hit then
+                matches = matches + 1
+                if shown < 40 then
+                    shown = shown + 1
+                    -- Readable name first when we have one, raw id underneath,
+                    -- because the id is what the Give button actually sends.
+                    if d and d.name then
+                        ImGui.Text(d.name)
+                        if d.quality then same(); textc(qualityCol(d.quality), '[' .. d.quality .. ']') end
+                        textc(COL.dim, name)
+                        if d.desc then textc(COL.dim, d.desc) end
+                    else
+                        ImGui.Text(name)
                     end
-                elseif ACTIONS.vehicle.probe() then
-                    -- "Add to list" rather than "Unlock": this puts the car in
-                    -- your summonable list. It does NOT park one in front of
-                    -- you, which is what the old label implied.
-                    if ImGui.Button('Add to list##b' .. n) then
-                        local ok, res = ACTIONS.vehicle.run(name, true)
-                        note(verdict(name .. ' -> vehicle list', ok, res,
-                            'Summon it from the phone; nothing spawns here.'))
-                    end
-                    if ACTIONS.vehicle.canSpawn() then
-                        same()
-                        if ImGui.Button('Spawn now##s' .. n) then
-                            local ok, res = ACTIONS.vehicle.spawn(name)
-                            note(verdict('spawn ' .. name, ok, res,
-                                'If nothing appeared, the call accepted it but the game did not place a car.'))
+                    if b.give == 'item' then
+                        if ImGui.Button('Give##b' .. n) then
+                            local ok, msg = giveItem(name, 1)
+                            note((ok and 'OK  ' or 'FAIL ') .. msg)
                         end
+                    elseif ACTIONS.vehicle.probe() then
+                        -- "Add to list" rather than "Unlock": this puts the car in
+                        -- your summonable list. It does NOT park one in front of
+                        -- you, which is what the old label implied.
+                        if ImGui.Button('Add to list##b' .. n) then
+                            local ok, res = ACTIONS.vehicle.run(name, true)
+                            note(verdict(name .. ' -> vehicle list', ok, res,
+                                'Summon it from the phone; nothing spawns here.'))
+                        end
+                        if ACTIONS.vehicle.canSpawn() then
+                            same()
+                            if ImGui.Button('Spawn now##s' .. n) then
+                                local ok, res = ACTIONS.vehicle.spawn(name)
+                                note(verdict('spawn ' .. name, ok, res,
+                                    'If nothing appeared, the call accepted it but the game did not place a car.'))
+                            end
+                        end
+                    else
+                        textc(COL.dim, 'vehicle system unavailable')
                     end
-                else
-                    textc(COL.dim, 'vehicle system unavailable')
+                    sep()
                 end
-                sep()
             end
         end
-    end
-    if matches > shown then
-        textc(COL.dim, ('%d more match. Narrow the search.'):format(matches - shown))
-    elseif matches == 0 then
-        textc(COL.warn, 'nothing matches that')
+        if matches > shown then
+            textc(COL.dim, ('%d more match. Narrow the search.'):format(matches - shown))
+        elseif matches == 0 then
+            textc(COL.warn, 'nothing matches that')
+        end
     end
 end
 
@@ -2361,188 +2480,194 @@ end
 local function tabDiagnostics()
     -- The ids that failed, named. This is the first thing in the tab because
     -- it is the only part of Diagnostics that is ever urgent.
-    section('ids not on this build', 'AlertCircle')
-    if #state.missing == 0 then
-        textc(COL.ok, string.format('%s all %d ids verified against your TweakDB',
-            ic('CheckCircle'), state.idsChecked or 0))
-    else
-        wrapped(string.format(
-            '%d of %d ids are not in your TweakDB, so their rows are greyed out rather than fired into nothing. Usually a patch renamed them. Ask your own game what it calls them now.',
-            #state.missing, state.idsChecked or 0))
-        for i, m in ipairs(state.missing) do
-            statusIcon('bad')
-            sameAt(30); ImGui.Text(m.label)
-            -- The record id is the longest thing on the row and the least
-            -- willing to shorten, so it gets its own line rather than a
-            -- column that runs off the edge on a narrow window.
-            sameAt(300, 60); textc(COL.dim, m.group)
-            ImGui.Indent(30); textc(COL.warn, m.record); ImGui.Unindent(30)
-            if ImGui.Button('Find it on this build##find' .. i) then
-                local hits, how = findLike(m.record)
-                state.found[m.record] = hits
-                note('%s: %d candidate(s), %s', m.record, #hits, how)
-            end
-            local hits = state.found[m.record]
-            if hits then
-                if #hits == 0 then
-                    same(); textc(COL.dim, 'nothing similar in TweakDB either')
-                else
-                    for _, h in ipairs(hits) do
-                        textc(COL.cyan, '      ' .. tostring(h))
+    if section('ids not on this build', 'AlertCircle') then
+        if #state.missing == 0 then
+            textc(COL.ok, string.format('%s all %d ids verified against your TweakDB',
+                ic('CheckCircle'), state.idsChecked or 0))
+        else
+            wrapped(string.format(
+                '%d of %d ids are not in your TweakDB, so their rows are greyed out rather than fired into nothing. Usually a patch renamed them. Ask your own game what it calls them now.',
+                #state.missing, state.idsChecked or 0))
+            for i, m in ipairs(state.missing) do
+                statusIcon('bad')
+                sameAt(30); ImGui.Text(m.label)
+                -- The record id is the longest thing on the row and the least
+                -- willing to shorten, so it gets its own line rather than a
+                -- column that runs off the edge on a narrow window.
+                sameAt(300, 60); textc(COL.dim, m.group)
+                ImGui.Indent(30); textc(COL.warn, m.record); ImGui.Unindent(30)
+                if ImGui.Button('Find it on this build##find' .. i) then
+                    local hits, how = findLike(m.record)
+                    state.found[m.record] = hits
+                    note('%s: %d candidate(s), %s', m.record, #hits, how)
+                end
+                local hits = state.found[m.record]
+                if hits then
+                    if #hits == 0 then
+                        same(); textc(COL.dim, 'nothing similar in TweakDB either')
+                    else
+                        for _, h in ipairs(hits) do
+                            textc(COL.cyan, '      ' .. tostring(h))
+                        end
                     end
                 end
             end
+            if ImGui.Button('Print the whole list to the CET console##misslist') then
+                -- print() lands in CET's own console, which is selectable text.
+                -- That makes the list reportable without a screenshot.
+                pcall(function()
+                    print('[Mikoshi] ids not on this build (' .. #state.missing
+                          .. ' of ' .. tostring(state.idsChecked) .. '):')
+                    for _, m in ipairs(state.missing) do
+                        print('  ' .. m.group .. '  ' .. m.record .. '  -- ' .. m.label)
+                    end
+                end)
+                note('printed %d missing id(s) to the CET console', #state.missing)
+            end
         end
-        if ImGui.Button('Print the whole list to the CET console##misslist') then
-            -- print() lands in CET's own console, which is selectable text.
-            -- That makes the list reportable without a screenshot.
-            pcall(function()
-                print('[Mikoshi] ids not on this build (' .. #state.missing
-                      .. ' of ' .. tostring(state.idsChecked) .. '):')
-                for _, m in ipairs(state.missing) do
-                    print('  ' .. m.group .. '  ' .. m.record .. '  -- ' .. m.label)
-                end
-            end)
-            note('printed %d missing id(s) to the CET console', #state.missing)
-        end
-    end
-    sep()
-
-    section('watch list', 'Pulse')
-    wrapped('These appear on the pinned card, live, while you play. Pin the facts a quest should be setting, go do the thing, and watch which one never moves.')
-    if caps.InputText then
-        local v = ImGui.InputText('fact name##watchin', state.watch.input, 96)
-        if type(v) == 'string' then state.watch.input = v end
-        same()
-        if ImGui.Button('Watch it##watchadd') then
-            local ok, msg = addWatch(state.watch.input)
-            if ok then state.watch.input = '' end
-            note((ok and 'OK  ' or 'FAIL ') .. msg)
-        end
-    else
-        textc(COL.bad, 'InputText unavailable, so facts cannot be added on this build')
+        sep()
     end
 
-    if #state.watch.list == 0 then
-        textc(COL.dim, 'Nothing watched. Try one of the quest fact names above.')
-    else
-        for i = #state.watch.list, 1, -1 do
-            local name = state.watch.list[i]
-            local v = state.watch.prev[name]
-            ImGui.Text(name)
-            sameAt(280); textc(COL.cyan, v == nil and '--' or tostring(v))
+    if section('watch list', 'Pulse') then
+        wrapped('These appear on the pinned card, live, while you play. Pin the facts a quest should be setting, go do the thing, and watch which one never moves.')
+        if caps.InputText then
+            local v = ImGui.InputText('fact name##watchin', state.watch.input, 96)
+            if type(v) == 'string' then state.watch.input = v end
             same()
-            if ImGui.Button('Drop##watchdrop' .. i) then removeWatch(i) end
-        end
-        textc(COL.dim, 'Saved beside the mod, so the list survives a reload.')
-    end
-    state.showCoords = ImGui.Checkbox('also show my coordinates on the card', state.showCoords)
-    sep()
-
-    section('appearance', 'Palette')
-    wrapped('A palette sets the whole window, not just the accent: the base, the panels, the buttons, the greys and the status colours are all derived from the three colours on the chip. The strip along the bottom of each chip is its accent and secondary; the body of the chip is the base you get.')
-    paletteGrid()
-    textc(COL.dim, ic('ContentSave') .. 'Saved by name beside the mod, so it survives a reload.')
-    sep()
-
-    if state.fancy == false then
-        -- "draw list unavailable" was true and useless. Name the call that is
-        -- missing, because the answer decides whether this is fixable here or
-        -- a limit of CET itself.
-        local miss = {}
-        for _, n in ipairs({ 'GetWindowDrawList', 'GetCursorScreenPos',
-                             'GetContentRegionAvail', 'Dummy' }) do
-            if not caps[n] then miss[#miss + 1] = n end
-        end
-        if #miss > 0 then
-            textc(COL.warn, 'banner: flat fallback. CET does not bind ' .. table.concat(miss, ', '))
+            if ImGui.Button('Watch it##watchadd') then
+                local ok, msg = addWatch(state.watch.input)
+                if ok then state.watch.input = '' end
+                note((ok and 'OK  ' or 'FAIL ') .. msg)
+            end
         else
-            textc(COL.warn, 'banner: flat fallback. Every call is bound, so a draw call itself raised')
+            textc(COL.bad, 'InputText unavailable, so facts cannot be added on this build')
         end
-        textc(COL.dim, 'Not a fault in your install. Rules, bars and the palette chips are built from widgets instead, which is why they still have colour.')
-    else
-        textc(COL.ok, 'banner: drawn with the ImGui draw list')
-    end
-    textc(Icons and COL.ok or COL.warn,
-        'IconGlyphs: ' .. (Icons and ('loaded via require("' .. tostring(iconPath) .. '")')
-                                 or ('every path failed: ' .. tostring(iconErr))))
-    state.icons = ImGui.Checkbox('show icons', state.icons)
-    textc(COL.dim, 'Turn this off if the icons render as empty boxes on your build.')
-    sep()
 
-    section('record names')
-    textc(state.browse.accessor and COL.ok or COL.dim,
-        'id accessor: ' .. tostring(state.browse.accessor or 'not probed yet, open Browse'))
-    textc(hasGlobal('GetLocalizedText') and COL.ok or COL.warn,
-        'GetLocalizedText: ' .. (hasGlobal('GetLocalizedText') and 'present' or 'missing, names stay raw'))
-    textc(COL.dim, 'Icons are not possible: ImGui needs a texture handle and CET exposes no loader for the game atlases.')
-    sep()
-
-    section('vehicle system')
-    wrapped('If "Add to list" reports refused, the record is not a player vehicle. Dump the system to see every method it really has, then tell me which one spawns.')
-    if ImGui.Button('Dump vehicle system to the log##dumpvs') then
-        local ok, out = pcall(function() return Dump(Game.GetVehicleSystem(), false) end)
-        if ok then
-            print('[Mikoshi] vehicle system dump follows')
-            print(tostring(out))
-            note('OK  dumped the vehicle system to the console and cyber_engine_tweaks.log')
+        if #state.watch.list == 0 then
+            textc(COL.dim, 'Nothing watched. Try one of the quest fact names above.')
         else
-            note('FAIL Dump refused: ' .. tostring(out))
+            for i = #state.watch.list, 1, -1 do
+                local name = state.watch.list[i]
+                local v = state.watch.prev[name]
+                ImGui.Text(name)
+                sameAt(280); textc(COL.cyan, v == nil and '--' or tostring(v))
+                same()
+                if ImGui.Button('Drop##watchdrop' .. i) then removeWatch(i) end
+            end
+            textc(COL.dim, 'Saved beside the mod, so the list survives a reload.')
         end
+        state.showCoords = ImGui.Checkbox('also show my coordinates on the card', state.showCoords)
+        sep()
     end
-    textc(ACTIONS.vehicle.canSpawn() and COL.ok or COL.dim,
-        'SpawnPlayerVehicle: ' .. (ACTIONS.vehicle.canSpawn() and 'present' or 'not on this build'))
-    sep()
 
-    section('keybind')
-    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin the watch card", click the empty box, press the key you want, then Save.')
-    textc(state.pinned and COL.ok or COL.dim,
-        state.pinned and 'pinned: the menu stays on screen with the overlay shut'
-                       or 'not pinned: the menu shows only while the overlay is open')
-    textc(COL.warn, 'Your key pins a small status card only. To USE the menu, open the CET overlay.')
-    textc(COL.dim, 'CET sends mouse and keyboard to ImGui only while its overlay is showing, and a mod cannot open that overlay. Nothing to fix here.')
-    sep()
+    if section('appearance', 'Palette') then
+        wrapped('A palette sets the whole window, not just the accent: the base, the panels, the buttons, the greys and the status colours are all derived from the three colours on the chip. The strip along the bottom of each chip is its accent and secondary; the body of the chip is the base you get.')
+        paletteGrid()
+        textc(COL.dim, ic('ContentSave') .. 'Saved by name beside the mod, so it survives a reload.')
+        sep()
 
-    ImGui.Text('Resolved game API')
-    textc(api.setFact and COL.ok or COL.bad, 'set fact:  ' .. tostring(api.setFactSrc))
-    textc(api.getFact and COL.ok or COL.bad, 'read fact: ' .. tostring(api.getFactSrc))
-    textc(api.journalOk and COL.ok or COL.bad, 'journal:   ' .. (api.journalOk and 'all four methods present' or 'incomplete'))
-    textc(api.stateNamed and COL.ok or COL.warn, 'state enum: ' .. tostring(api.stateSrc))
-    textc(api.notifyNamed and COL.ok or COL.warn, 'notify enum: ' .. tostring(api.notifySrc))
-    sep()
-
-    ImGui.Text('ImGui bindings')
-    local missing = {}
-    for k, v in pairs(caps) do if v == false then table.insert(missing, k) end end
-    if #missing == 0 then textc(COL.ok, 'every widget this menu uses is present')
-    else textc(COL.warn, 'missing: ' .. table.concat(missing, ', ')) end
-    sep()
-
-    if dataErr then textc(COL.bad, 'data.lua failed to load: ' .. dataErr); sep() end
-
-    ImGui.Text('Check anything by hand')
-    if caps.InputText then
-        local v = ImGui.InputText('fact##probefact', state.probe.fact, 96)
-        if type(v) == 'string' then state.probe.fact = v end
+        if state.fancy == false then
+            -- "draw list unavailable" was true and useless. Name the call that is
+            -- missing, because the answer decides whether this is fixable here or
+            -- a limit of CET itself.
+            local miss = {}
+            for _, n in ipairs({ 'GetWindowDrawList', 'GetCursorScreenPos',
+                                 'GetContentRegionAvail', 'Dummy' }) do
+                if not caps[n] then miss[#miss + 1] = n end
+            end
+            if #miss > 0 then
+                textc(COL.warn, 'banner: flat fallback. CET does not bind ' .. table.concat(miss, ', '))
+            else
+                textc(COL.warn, 'banner: flat fallback. Every call is bound, so a draw call itself raised')
+            end
+            textc(COL.dim, 'Not a fault in your install. Rules, bars and the palette chips are built from widgets instead, which is why they still have colour.')
+        else
+            textc(COL.ok, 'banner: drawn with the ImGui draw list')
+        end
+        textc(Icons and COL.ok or COL.warn,
+            'IconGlyphs: ' .. (Icons and ('loaded via require("' .. tostring(iconPath) .. '")')
+                                     or ('every path failed: ' .. tostring(iconErr))))
+        state.icons = ImGui.Checkbox('show icons', state.icons)
+        textc(COL.dim, 'Turn this off if the icons render as empty boxes on your build.')
+        sep()
     end
-    if ImGui.Button('Read fact##probe') and api.getFact then
-        local ok, val = pcall(function() return api.getFact(state.probe.fact) end)
-        state.probeResult = ok and (state.probe.fact .. ' = ' .. tostring(val))
-                              or ('read failed: ' .. tostring(val))
-    end
-    if caps.InputText then
-        local v = ImGui.InputText('record##probeitem', state.probe.item, 96)
-        if type(v) == 'string' then state.probe.item = v end
-    end
-    if ImGui.Button('Does this record exist?##probe') then
-        state.probeResult = state.probe.item .. (recordExists(state.probe.item)
-            and ' -> present in TweakDB' or ' -> NOT in TweakDB on this build')
-    end
-    if state.probeResult ~= '' then textc(COL.dim, state.probeResult) end
-    sep()
 
-    ImGui.Text('Activity')
-    for i = 1, math.min(#state.log, 12) do textc(COL.dim, state.log[i]) end
+    if section('record names') then
+        textc(state.browse.accessor and COL.ok or COL.dim,
+            'id accessor: ' .. tostring(state.browse.accessor or 'not probed yet, open Browse'))
+        textc(hasGlobal('GetLocalizedText') and COL.ok or COL.warn,
+            'GetLocalizedText: ' .. (hasGlobal('GetLocalizedText') and 'present' or 'missing, names stay raw'))
+        textc(COL.dim, 'Icons are not possible: ImGui needs a texture handle and CET exposes no loader for the game atlases.')
+        sep()
+    end
+
+    if section('vehicle system') then
+        wrapped('If "Add to list" reports refused, the record is not a player vehicle. Dump the system to see every method it really has, then tell me which one spawns.')
+        if ImGui.Button('Dump vehicle system to the log##dumpvs') then
+            local ok, out = pcall(function() return Dump(Game.GetVehicleSystem(), false) end)
+            if ok then
+                print('[Mikoshi] vehicle system dump follows')
+                print(tostring(out))
+                note('OK  dumped the vehicle system to the console and cyber_engine_tweaks.log')
+            else
+                note('FAIL Dump refused: ' .. tostring(out))
+            end
+        end
+        textc(ACTIONS.vehicle.canSpawn() and COL.ok or COL.dim,
+            'SpawnPlayerVehicle: ' .. (ACTIONS.vehicle.canSpawn() and 'present' or 'not on this build'))
+        sep()
+    end
+
+    if section('keybind') then
+        wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin the watch card", click the empty box, press the key you want, then Save.')
+        textc(state.pinned and COL.ok or COL.dim,
+            state.pinned and 'pinned: the menu stays on screen with the overlay shut'
+                           or 'not pinned: the menu shows only while the overlay is open')
+        textc(COL.warn, 'Your key pins a small status card only. To USE the menu, open the CET overlay.')
+        textc(COL.dim, 'CET sends mouse and keyboard to ImGui only while its overlay is showing, and a mod cannot open that overlay. Nothing to fix here.')
+        sep()
+
+        ImGui.Text('Resolved game API')
+        textc(api.setFact and COL.ok or COL.bad, 'set fact:  ' .. tostring(api.setFactSrc))
+        textc(api.getFact and COL.ok or COL.bad, 'read fact: ' .. tostring(api.getFactSrc))
+        textc(api.journalOk and COL.ok or COL.bad, 'journal:   ' .. (api.journalOk and 'all four methods present' or 'incomplete'))
+        textc(api.stateNamed and COL.ok or COL.warn, 'state enum: ' .. tostring(api.stateSrc))
+        textc(api.notifyNamed and COL.ok or COL.warn, 'notify enum: ' .. tostring(api.notifySrc))
+        sep()
+
+        ImGui.Text('ImGui bindings')
+        local missing = {}
+        for k, v in pairs(caps) do if v == false then table.insert(missing, k) end end
+        if #missing == 0 then textc(COL.ok, 'every widget this menu uses is present')
+        else textc(COL.warn, 'missing: ' .. table.concat(missing, ', ')) end
+        sep()
+
+        if dataErr then textc(COL.bad, 'data.lua failed to load: ' .. dataErr); sep() end
+
+        ImGui.Text('Check anything by hand')
+        if caps.InputText then
+            local v = ImGui.InputText('fact##probefact', state.probe.fact, 96)
+            if type(v) == 'string' then state.probe.fact = v end
+        end
+        if ImGui.Button('Read fact##probe') and api.getFact then
+            local ok, val = pcall(function() return api.getFact(state.probe.fact) end)
+            state.probeResult = ok and (state.probe.fact .. ' = ' .. tostring(val))
+                                  or ('read failed: ' .. tostring(val))
+        end
+        if caps.InputText then
+            local v = ImGui.InputText('record##probeitem', state.probe.item, 96)
+            if type(v) == 'string' then state.probe.item = v end
+        end
+        if ImGui.Button('Does this record exist?##probe') then
+            state.probeResult = state.probe.item .. (recordExists(state.probe.item)
+                and ' -> present in TweakDB' or ' -> NOT in TweakDB on this build')
+        end
+        if state.probeResult ~= '' then textc(COL.dim, state.probeResult) end
+        sep()
+
+        ImGui.Text('Activity')
+        for i = 1, math.min(#state.log, 12) do textc(COL.dim, state.log[i]) end
+    end
 end
 
 local function tabUndo()
@@ -2638,6 +2763,7 @@ registerForEvent('onInit', function()
     loadTheme()
     loadWatch()
     loadBlocked()
+    loadFolds()
     resolveApi()
     verifyAll()
     mod.ready = true
