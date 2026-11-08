@@ -79,7 +79,11 @@ local state = {
 -- six hundred lines above it -- needs it to put the in-game name on a row, and
 -- a local declared below its caller resolves as a global and is nil when the
 -- button is pressed. That has cost this file four separate bugs.
-local verdict, recordName, describe
+-- localise() joins describe() in being forward declared: both live down with
+-- the Browse code and both are needed six hundred lines above it. A local
+-- called above its own declaration is a nil global, which remains the most
+-- common bug in this file.
+local verdict, recordName, describe, localise
 
 -- CET ships 7097 Material Design glyphs and the font to render them
 -- (cyber_engine_tweaksontsmaterialdesignicons.ttf), so the menu can have
@@ -597,10 +601,18 @@ end
 -- A readable label for a blocked quest. The key may be a hash, which tells a
 -- player nothing, so keep whatever the entry can give us alongside it.
 local function entryLabel(e)
+    -- A journal title comes back as a LocKey, not as words. The panel was
+    -- printing "LocKey#11946" at a player and calling it the quest name.
+    -- localise() turns one into text and has been in this file the whole time.
+    --
+    -- Order matters below: a title that will not resolve is worth less than
+    -- the quest's own id, because "sq023_hit_order" at least says which quest
+    -- it is. The raw key is last, since it says nothing to anyone.
     for _, getter in ipairs({
-        function() return e:GetTitle(api.journal) end,
+        function() return localise(e:GetTitle(api.journal)) end,
         function() return e:GetId() end,
         function() return e:GetPath() end,
+        function() return e:GetTitle(api.journal) end,
     }) do
         local ok, v = pcall(getter)
         if ok and v ~= nil and tostring(v) ~= '' then return tostring(v) end
@@ -2169,7 +2181,7 @@ local function asString(v)
     return nil
 end
 
-local function localise(v)
+function localise(v)
     local s = asString(v)
     if not s then return nil end
     -- Only something shaped like LocKey#12345 is a key that can fail to
