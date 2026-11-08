@@ -222,6 +222,16 @@ local function note(fmt, ...)
     print('[Mikoshi] ' .. msg)
 end
 
+-- 10000 is unreadable at a glance and 1000000 is worse. Group the digits for
+-- display only; the input box itself stays a plain integer field, because
+-- InputInt will not parse a string with separators in it.
+local function comma(n)
+    local out = tostring(math.floor(tonumber(n) or 0))
+    local hits
+    repeat out, hits = out:gsub('^(-?%d+)(%d%d%d)', '%1,%2') until hits == 0
+    return out
+end
+
 local function recordExists(id)
     local ok, r = pcall(function() return TweakDB:GetRecord(id) end)
     return ok and r ~= nil
@@ -398,11 +408,11 @@ local function giveItem(id, qty, loop)
             given = given + 1
         end
         if given == 0 then return false, 'nothing was added for ' .. id end
-        return true, string.format('gave %d x %s, one call each because this item ignores quantity', given, id)
+        return true, string.format('gave %s x %s, one call each because this item ignores quantity', comma(given), id)
     end
     local ok, err = pcall(function() Game.AddToInventory(id, qty) end)
     if not ok then return false, tostring(err) end
-    return true, string.format('gave %d x %s', qty, id)
+    return true, string.format('gave %s x %s', comma(qty), id)
 end
 
 local function setFactLogged(name, value)
@@ -703,27 +713,36 @@ local function section(title, icon)
     if caps.SeparatorText then pcall(function() ImGui.Separator() end) end
 end
 
+
 local function amountBox(key, default, step)
     if state.amounts[key] == nil then state.amounts[key] = default or 1 end
+    local v = state.amounts[key]
     if caps.InputInt then
-        -- InputInt draws its OWN minus and plus when given a step, which is
-        -- why every row had two pairs of them. Use those, and cap the width or
-        -- the box eats the rest of the line and pushes Give off the edge.
+        -- InputInt puts its own minus and plus INSIDE the item width, so the
+        -- typing area is the width given minus two buttons. 118 was cutting
+        -- five-figure numbers in half. Size it to the digits actually there.
         if caps.SetNextItemWidth then
-            pcall(function() ImGui.SetNextItemWidth(118) end)
+            local digits = #tostring(math.floor(math.abs(v))) 
+            local w = 150 + math.max(0, digits - 3) * 14
+            pcall(function() ImGui.SetNextItemWidth(math.min(w, 260)) end)
         end
-        local v = ImGui.InputInt('##amt' .. key, state.amounts[key], step or 1)
-        if type(v) == 'number' then state.amounts[key] = math.max(0, v) end
+        local nv = ImGui.InputInt('##amt' .. key, v, step or 1)
+        if type(nv) == 'number' then state.amounts[key] = math.max(0, nv) end
     else
-        ImGui.Text(tostring(state.amounts[key]))
+        ImGui.Text(tostring(v))
         same()
         if ImGui.Button('-##' .. key) then
-            state.amounts[key] = math.max(0, state.amounts[key] - (step or 1))
+            state.amounts[key] = math.max(0, v - (step or 1))
         end
         same()
         if ImGui.Button('+##' .. key) then
-            state.amounts[key] = state.amounts[key] + (step or 1)
+            state.amounts[key] = v + (step or 1)
         end
+    end
+    -- The grouped form sits beside the box, where it is readable without
+    -- interfering with typing.
+    if state.amounts[key] >= 1000 then
+        same(); textc(COL.dim, comma(state.amounts[key]))
     end
     return state.amounts[key]
 end
