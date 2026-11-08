@@ -45,6 +45,8 @@ local state = {
     log         = {},      -- newest first, what just happened
     armed       = false,   -- force-complete safety
     records     = {},      -- id -> true/false, filled at onInit
+    missing     = {},      -- the rows whose record is not on this build
+    found       = {},      -- missing id -> candidates read out of live TweakDB
     fields      = {},      -- template input boxes
     probe       = { fact = 'ig_phone_manager_off', item = 'Items.money' },
     icons       = true,
@@ -241,19 +243,36 @@ end
 
 local function verifyAll()
     local checked, found = 0, 0
-    local function check(list)
+    state.missing = {}
+    -- Keep the rows that failed, not just the count. "24 of 32 verified" told
+    -- you something was wrong and gave you no way to find out what, which is
+    -- the same dead end a silent wrong id leaves you in.
+    local function check(list, group)
         for _, row in ipairs(list or {}) do
             if row.record then
-                state.records[row.record] = recordExists(row.record)
+                local present = recordExists(row.record)
+                state.records[row.record] = present
                 checked = checked + 1
-                if state.records[row.record] then found = found + 1 end
+                if present then
+                    found = found + 1
+                else
+                    state.missing[#state.missing + 1] = {
+                        label  = row.label or row.record,
+                        record = row.record,
+                        group  = group,
+                    }
+                end
             end
         end
     end
-    check(data.everyday); check(data.shards)
-    check(data.ammo); check(data.healing); check(data.crafting); check(data.iconics)
+    check(data.everyday, 'everyday'); check(data.shards, 'shards')
+    check(data.ammo, 'ammo'); check(data.healing, 'healing')
+    check(data.crafting, 'crafting'); check(data.iconics, 'iconics')
     state.idsFound, state.idsChecked = found, checked
     note('TweakDB check: %d of %d ids present on this build', found, checked)
+    if #state.missing > 0 then
+        note('%d id(s) are not on this build. Diagnostics names them.', #state.missing)
+    end
 end
 
 -- Functions cannot be looked up in TweakDB the way item ids can, so they are
@@ -1598,6 +1617,58 @@ local function loadBrowse(i)
     note('browse %s: read %d of %d names via %s', b.label, #names, total, state.browse.accessor)
 end
 
+-- ---------------------------------------------------------------------------
+-- What does THIS build call it?
+--
+-- An id that is not in TweakDB is usually not an invention, it is a rename: a
+-- patch moved MaxDoc, or the quickhack components stopped being items. The
+-- answer is in the running game, so ask the running game. Sweep the record
+-- types an item can live in, and keep the ones whose id contains the
+-- distinctive tail of the one that failed.
+--
+-- GetRecords is per concrete type and some of these hold tens of thousands of
+-- records, so this runs on a button press and never on a frame.
+-- ---------------------------------------------------------------------------
+local SEARCH_TYPES = {
+    'gamedataConsumableItem_Record',
+    'gamedataGenericItem_Record',
+    'gamedataAmmo_Record',
+    'gamedataClothing_Record',
+    'gamedataWeaponItem_Record',
+    'gamedataItem_Record',
+}
+
+local function findLike(id)
+    -- The tail is what identifies the thing: Items.CPO_MaxDoc is looked up as
+    -- "MaxDoc", because the prefix is exactly the part a rename changes.
+    local tail = tostring(id):match('([^%.]+)$') or tostring(id)
+    tail = tail:gsub('^CPO_', ''):gsub('%d+$', '')
+    local needle = tail:lower()
+    if #needle < 3 then return {}, 'that id has nothing distinctive to search for' end
+
+    local hits, seen, swept = {}, {}, 0
+    for _, t in ipairs(SEARCH_TYPES) do
+        local ok, recs = pcall(function() return TweakDB:GetRecords(t) end)
+        if ok and recs ~= nil then
+            swept = swept + 1
+            pcall(function()
+                for _, r in ipairs(recs) do
+                    local n = recordName(r)
+                    if n and not seen[n] and tostring(n):lower():find(needle, 1, true) then
+                        seen[n] = true
+                        hits[#hits + 1] = n
+                        if #hits >= 24 then return end
+                    end
+                end
+            end)
+        end
+        if #hits >= 24 then break end
+    end
+    table.sort(hits)
+    if swept == 0 then return hits, 'TweakDB:GetRecords answered for none of the item types' end
+    return hits, string.format('searched %d record type(s) for "%s"', swept, tail)
+end
+
 local function tabBrowse()
     section('source')
     if state.browse.idx == 3 then
@@ -1781,6 +1852,52 @@ local function paletteGrid()
 end
 
 local function tabDiagnostics()
+    -- The ids that failed, named. This is the first thing in the tab because
+    -- it is the only part of Diagnostics that is ever urgent.
+    section('ids not on this build', 'AlertCircle')
+    if #state.missing == 0 then
+        textc(COL.ok, string.format('%s all %d ids verified against your TweakDB',
+            ic('CheckCircle'), state.idsChecked or 0))
+    else
+        wrapped(string.format(
+            '%d of %d ids are not in your TweakDB, so their rows are greyed out rather than fired into nothing. Usually a patch renamed them. Ask your own game what it calls them now.',
+            #state.missing, state.idsChecked or 0))
+        for i, m in ipairs(state.missing) do
+            statusIcon('bad')
+            sameAt(30); ImGui.Text(m.label)
+            sameAt(300); textc(COL.dim, m.group)
+            sameAt(380); textc(COL.warn, m.record)
+            if ImGui.Button('Find it on this build##find' .. i) then
+                local hits, how = findLike(m.record)
+                state.found[m.record] = hits
+                note('%s: %d candidate(s), %s', m.record, #hits, how)
+            end
+            local hits = state.found[m.record]
+            if hits then
+                if #hits == 0 then
+                    same(); textc(COL.dim, 'nothing similar in TweakDB either')
+                else
+                    for _, h in ipairs(hits) do
+                        textc(COL.cyan, '      ' .. tostring(h))
+                    end
+                end
+            end
+        end
+        if ImGui.Button('Print the whole list to the CET console##misslist') then
+            -- print() lands in CET's own console, which is selectable text.
+            -- That makes the list reportable without a screenshot.
+            pcall(function()
+                print('[Mikoshi] ids not on this build (' .. #state.missing
+                      .. ' of ' .. tostring(state.idsChecked) .. '):')
+                for _, m in ipairs(state.missing) do
+                    print('  ' .. m.group .. '  ' .. m.record .. '  -- ' .. m.label)
+                end
+            end)
+            note('printed %d missing id(s) to the CET console', #state.missing)
+        end
+    end
+    sep()
+
     section('watch list', 'Pulse')
     wrapped('These appear on the pinned card, live, while you play. Pin the facts a quest should be setting, go do the thing, and watch which one never moves.')
     if caps.InputText then
