@@ -8,3 +8,6 @@ desktop.ini
 
 # Release staging; the zip is rebuilt from fixer/
 dist/stage/
+
+# Upload staging, generated from dist/ and docs/
+Nexus Mod Upload/
