@@ -8,13 +8,15 @@ Paste each block into the matching field.
 
 Daemon is a quest-repair and item menu for Cyberpunk 2077, built on Cyber Engine Tweaks.
 
-It exists because a Cyberpsycho Sighting would not close, and every fix list online gave the wrong item id for it. Four ids from popular community lists turned out to be wrong, including one that reads perfectly in game but belongs to a different quest entirely.
+It started with Letter of the Law: the quest would not register that I had gathered the information needed to proceed. Four ids from popular community lists turned out to be wrong, including one that reads perfectly in game but belongs to a different quest entirely.
 
 So the rule here is that nothing fires blind. Every item id is checked against the live TweakDB when the mod loads. Anything your game does not recognise is greyed out and labelled rather than fired into nothing. Functions cannot be checked that way, so they are probed against the game object instead. Where neither is possible, the menu tells you it could not verify rather than implying success.
 
 That matters because a wrong id does not throw an error. It does nothing, quietly, and you cannot tell "wrong code" from "code worked, quest still broken".
 
 **Try this first.** If a Cyberpsycho Sighting will not close, open your shards and read the ones you already hold. A shard picked up long ago and never read keeps the objective open, and no console command is needed to fix it. That is how the sighting that started this mod actually got solved.
+
+From that one quest it grew into the commands people actually ask for: eddies and points, ammo and components, weather and time of day, teleports with saved waypoints, and a browser that reads every clothing, weapon and vehicle id straight out of your own install.
 
 ---
 
