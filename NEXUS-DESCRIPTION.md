@@ -33,12 +33,21 @@ Engine Tweaks.**
 It exists because a cyberpsycho sighting would not close, and every fix list
 online gave the wrong item id for it.
 
+### Try this first
+
+If a Cyberpsycho Sighting will not close, open your shards and read the ones
+you already hold. A shard picked up long ago and never read keeps the
+objective open, and no console command is needed to fix it. That is how the
+first one I chased actually got solved. The menu lists all 17 with their
+districts so you can find the one you have not done.
+
 ### What it does
 
 - **Quest Fixes** — quest-fact repairs that read the old value before writing
   it, so every change can be put back from the Undo tab. Templates for fixer
   tier unlocks and gig counters. A checklist of all 17 Cyberpsycho Sightings
-  with their districts and internal quest ids.
+  with their districts and internal quest ids, as a reference rather than an
+  automated check.
 - **Shards** — conversation shards that fail to spawn on a body, which is the
   usual reason a sighting will not complete.
 - **Inventory** — eddies, perk and attribute points, ammo, consumables,

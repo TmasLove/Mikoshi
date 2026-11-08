@@ -831,48 +831,14 @@ local function tabQuestFixes()
     end
 
     section('cyberpsycho sightings', 'AccountAlert')
-    wrapped('All 17, with the district read off the quest id. Press Check all and the mod reads each quest\'s facts; anything that answers is shown, so a sighting that reports nothing is the one you have not done.')
-    if ImGui.Button('Check all 17##psyall') then
-        state.psy = {}
-        local answered = 0
-        for _, p in ipairs(data.cyberpsychos or {}) do
-            local best
-            -- No finished-state convention is documented anywhere, so try the
-            -- obvious forms and keep whatever the quest system answers with.
-            for _, suffix in ipairs({ '', '_finished', '_completed', '_done' }) do
-                local ok, v = pcall(function() return api.getFact(p.id .. suffix) end)
-                if ok and type(v) == 'number' and v ~= 0 then
-                    best = (suffix == '' and 'fact' or suffix) .. ' = ' .. tostring(v)
-                    break
-                end
-            end
-            state.psy[p.id] = best
-            if best then answered = answered + 1 end
-        end
-        note('cyberpsychos: %d of 17 answered with a non-zero fact', answered)
-    end
-    same()
-    if ImGui.Button('Clear##psyclr') then state.psy = nil end
-
+    textc(COL.warn, 'Before anything else: open your shards and read the ones you already hold.')
+    hint('A sighting often stays open because a shard you already picked up was never READ. That closes more of these than any command here. The list below is a reference for finding the one you have not done.')
     for i, p in ipairs(data.cyberpsychos or {}) do
-        local val = state.psy and state.psy[p.id]
         ImGui.Text(p.name)
-        same()
-        if state.psy then
-            if val then statusIcon('ok'); same(); textc(COL.dim, val) else statusIcon('warn') end
-        end
-        textc(COL.dim, p.district .. '   ' .. p.id)
-        if ImGui.Button('Read this one##psy' .. i) then
-            local lines = {}
-            for _, suffix in ipairs({ '', '_finished', '_completed', '_done' }) do
-                local ok, v = pcall(function() return api.getFact(p.id .. suffix) end)
-                lines[#lines + 1] = (suffix == '' and 'fact' or suffix) .. '=' ..
-                    (ok and tostring(v) or 'err')
-            end
-            note('%s  %s', p.id, table.concat(lines, '  '))
-        end
-        sep()
+        sameAt(260); textc(COL.dim, p.district)
+        sameAt(470); textc(COL.dim, p.id)
     end
+    sep()
 
     ImGui.Text('Templates')
     for i, t in ipairs(data.templates or {}) do
@@ -906,6 +872,7 @@ local function tabQuestFixes()
 end
 
 local function tabShards()
+    textc(COL.warn, 'Read the shards you already hold first. An unread one you picked up long ago closes more sightings than any button here.')
     wrapped('Shards that fail to spawn on a body. Granting the shard is what unsticks the objective in most reports. Greyed rows are ids this build does not recognise.')
     sep()
     for i, s in ipairs(data.shards or {}) do
@@ -1582,7 +1549,7 @@ local TAB_FN = { tabQuestFixes, tabShards, tabInventory, tabWorld, tabBrowse, ta
 -- A count beside each category, the way a trainer menu shows how much is behind
 -- each entry. Undo is counted live because it grows as you use the thing.
 local function navCount(i)
-    if     i == 1 then return #(data.facts or {}) + #(data.templates or {}) + #(data.cyberpsychos or {}) + 1
+    if     i == 1 then return #(data.facts or {}) + #(data.templates or {}) + 1
     elseif i == 2 then return #(data.shards or {})
     elseif i == 3 then return #(data.everyday or {}) + #(data.exp or {}) + #(data.ammo or {})
                               + #(data.healing or {}) + #(data.crafting or {}) + #(data.iconics or {})
