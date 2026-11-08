@@ -21,6 +21,13 @@ Requires [Cyber Engine Tweaks](https://www.nexusmods.com/cyberpunk2077/mods/107)
 
 ## Install
 
+**Cyber Engine Tweaks is required.** Mikoshi is a Lua script CET loads and runs,
+not a standalone program. Without it nothing appears in game and there is no key
+to bind, because the binding does not exist until CET creates it. CET is not
+bundled here: it is version-locked to the game patch, so a bundled copy would go
+stale and could overwrite a working install with an older one.
+
+
 Copy `fixer/` to:
 
 ```

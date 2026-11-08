@@ -30,7 +30,9 @@ From that one quest it grew into the commands people actually ask for: eddies an
 INSTALLATION INSTRUCTIONS
 ======================================================================
 
-1. Install Cyber Engine Tweaks first if you do not already have it.
+CYBER ENGINE TWEAKS IS REQUIRED. Mikoshi is a Lua script that CET loads and runs; it is not a standalone program. Without CET nothing appears in game, no window opens, and there is no key to bind, because the binding does not exist until CET creates it.
+
+1. Install Cyber Engine Tweaks first: https://www.nexusmods.com/cyberpunk2077/mods/107 (1.38.1 or later). Launch the game once and confirm its overlay opens before going further.
 2. Unzip this mod into your Cyberpunk 2077 folder. It lands at bin\x64\plugins\cyber_engine_tweaks\mods\fixer\
 3. Open the CET overlay and press Reload All Mods, or restart the game.
 4. The Mikoshi window appears whenever the overlay is open.

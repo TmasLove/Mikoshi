@@ -1,0 +1,104 @@
+MIKOSHI - Night City Toolkit
+A quest-repair and item menu for Cyberpunk 2077
+================================================================
+
+NOTHING WILL HAPPEN WITHOUT CYBER ENGINE TWEAKS. READ THIS FIRST.
+----------------------------------------------------------------
+
+Mikoshi is not a program. It is a Lua script that Cyber Engine Tweaks loads
+and runs. CET is the mod framework that hooks the game, starts the Lua
+engine, draws the overlay window, and handles key bindings.
+
+So if you install Mikoshi on its own:
+
+  - nothing appears in game
+  - no window opens
+  - there is no key to press, because the binding does not exist yet
+
+That is not a bug in Mikoshi. There is simply nothing there to run it.
+
+
+STEP 1 - INSTALL CYBER ENGINE TWEAKS FIRST
+------------------------------------------
+Download it from the official page:
+
+  https://www.nexusmods.com/cyberpunk2077/mods/107
+
+You need version 1.38.1 or later, on game version 2.5.
+
+CET is version-locked to the game. If Cyberpunk updates and CET has not yet
+caught up, neither CET nor Mikoshi will run until CET ships a matching build.
+That is also why Mikoshi does not bundle a copy of CET: a bundled copy goes
+stale and would overwrite a working install with an older one.
+
+Install CET, launch the game once, and confirm its overlay opens before you
+go any further. CET asks you to choose an overlay key the first time it runs.
+
+
+STEP 2 - INSTALL MIKOSHI
+------------------------
+Unzip this archive into your Cyberpunk 2077 folder. The files land at:
+
+  bin\x64\plugins\cyber_engine_tweaks\mods\fixer\
+
+The folder is called "fixer" rather than "mikoshi" on purpose. CET ties key
+bindings to the folder name, so renaming it would wipe the binding of anyone
+who already set one. Leave it as it is.
+
+If you use Vortex, it places the files correctly on its own.
+
+
+STEP 3 - LOAD IT
+----------------
+Open the CET overlay and press "Reload All Mods". No restart needed.
+
+The Mikoshi window appears whenever the overlay is open.
+
+
+STEP 4 - BIND A KEY (OPTIONAL)
+------------------------------
+CET does not allow a mod to ship a default key, so Mikoshi starts unbound.
+This is a CET rule, not a choice, and it is why there is no key to press
+until you set one.
+
+  1. Open the CET overlay
+  2. Go to the Bindings tab
+  3. Find "Mikoshi: show menu"
+  4. Click the empty box next to it
+  5. Press the key you want
+  6. Press Save
+
+That key then pins the window on screen even with the overlay closed.
+
+One honest limit: clicking anything still needs the overlay open, because CET
+only sends mouse and keyboard input to the overlay while it is showing. The
+pinned window is readable with the overlay closed, but not clickable.
+
+
+IF SOMETHING LOOKS GREYED OUT
+-----------------------------
+That is deliberate. Mikoshi checks every item id against your own game when
+it loads. Anything your build does not recognise is greyed out and labelled
+instead of being fired into nothing.
+
+A wrong id does not throw an error in this game. It silently does nothing,
+and you cannot tell "wrong code" from "code worked, quest still broken". The
+greyed rows are Mikoshi telling you which is which.
+
+The Diagnostics category lists exactly what your build exposes.
+
+
+UNINSTALL
+---------
+Delete the "fixer" folder. Mikoshi writes nothing outside its own directory
+apart from a one-line theme.txt beside itself holding your chosen palette.
+
+
+REQUIREMENTS, SHORT VERSION
+---------------------------
+  Cyberpunk 2077            version 2.5
+  Cyber Engine Tweaks       version 1.38.1 or later   REQUIRED
+  RED4ext                   not required
+
+Licence: MIT. Cyber Engine Tweaks is separate software under GPL-3.0 and is
+not included in this download.
