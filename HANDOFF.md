@@ -27,7 +27,7 @@ So the architecture below is built around verification rather than around the UI
 
 | | |
 | --- | --- |
-| Game | Cyberpunk 2077 **2.5**, `D:\SteamLibrary\steamapps\common\Cyberpunk 2077` |
+| Game | Cyberpunk 2077 **2.5**, `<game folder>` |
 | Game exe | 64 MB, last written 2026-11-03 |
 | CET | **1.38.1**, `bin\x64\plugins\cyber_engine_tweaks.asi`, installed 2026-11-07 13:54 |
 | CET load | Clean. Every hook reports "complete", zero `[error]` or `[warning]` lines in `cyber_engine_tweaks.log` |
@@ -35,7 +35,7 @@ So the architecture below is built around verification rather than around the UI
 | Mods installed | **None.** `...\cyber_engine_tweaks\mods\` is empty |
 | Console use | `scripting.log` shows manual console commands today, adding `Items.PerkPointSkillbook` in loops |
 | RED4ext | **Not present anywhere in the game folder**, despite CET's README saying to install it first. CET 1.38.1 loads fine without it here |
-| Source zip | `C:\Users\User1\Downloads\Game Mods\CET 1.38.1 - Game version 2.5 107 1.38.1 2026-10-26T01-28Z ozVyzbb0n.zip`, already installed, no need to unzip again |
+| Source zip | `<downloads>\CET 1.38.1 for game 2.5.zip`, already installed, no need to unzip again |
 
 CET 1.38.0 is the release that added patch 2.5 support, stated as game version
 `3.0.88.46235`, and it says earlier patches are no longer supported. 1.38.1
@@ -195,3 +195,4 @@ is precisely the kind of half-fix that looks like success and is not.
 - ImGui examples: https://wiki.redmodding.org/scripting-cyberpunk/cyber-engine-tweaks/cet-functions/ui-examples.md
 - Official example mods: https://github.com/WolvenKit/cet-examples
 - Game script reference: https://nativedb.red4ext.com/
+

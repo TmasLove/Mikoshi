@@ -28,6 +28,8 @@ ship a default key, so it starts unbound.
 
 ## The rule this is built on
 
+![How verification works](docs/how-it-verifies.png)
+
 Nothing fires blind.
 
 Every item id is checked against the live TweakDB when the mod loads, and
@@ -63,6 +65,8 @@ behaviour in a tool whose job is to tell you whether a fix worked.
 - **Diagnostics** — what this build exposes, palette picker, manual record and
   fact checks.
 - **Undo** — every fact write with its previous value.
+
+![Six palettes](docs/palettes.png)
 
 ## What is deliberately not here
 
