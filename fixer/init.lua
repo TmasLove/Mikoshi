@@ -164,7 +164,7 @@ local function detectImGui()
                          'PushStyleColor', 'PopStyleColor', 'PushStyleVar', 'PopStyleVar',
                          'SeparatorText', 'Dummy', 'Indent', 'Unindent', 'ProgressBar',
                          'SetWindowFontScale', 'GetWindowDrawList', 'GetCursorScreenPos', 'SetNextItemWidth',
-                         'CollapsingHeader',
+                         'CollapsingHeader', 'PushTextWrapPos', 'PopTextWrapPos',
                          'GetContentRegionAvail', 'GetItemRectMin', 'GetItemRectMax', 'CalcTextSize' }) do
         caps[n] = fnExists(ImGui, n)
     end
@@ -293,7 +293,9 @@ end
 -- one was not one. So read the real values, and where they cannot be read say
 -- that instead of printing a number that means nothing.
 --
--- Two routes, tried in order, because neither is guaranteed on a build.
+-- Three routes, tried in order, because none is guaranteed on a build. The
+-- same readers serve street cred and XP, which is how those two report what
+-- actually changed instead of whether a call raised.
 -- ---------------------------------------------------------------------------
 local ATTR_READERS = {
     { 'StatsSystem:GetStatValue', function(stat)
@@ -312,7 +314,60 @@ local ATTR_READERS = {
     end },
 }
 
-local function readAttribute(stat)
+-- ---------------------------------------------------------------------------
+-- Street cred and XP.
+--
+-- Game.AddExp is the pre-2.0 call. The two calls sitting beside it in this
+-- file, Game.SetAttribute and Game.GiveDevPoints, were BOTH renamed at patch
+-- 2.0, so AddExp failing on 2.5 is exactly what that pattern predicts. The
+-- development system is the current route. AddExp is kept as a fallback for
+-- an older build rather than deleted.
+--
+-- Neither call returns anything useful, and "it did not raise" has already
+-- been mistaken for "it worked" twice in this file, so the amount is read
+-- before and after and the DIFFERENCE is what gets reported. If the value
+-- cannot be read, that is said plainly instead of claiming success.
+-- ---------------------------------------------------------------------------
+local readAttribute  -- forward declared: addExperience reads the value back
+
+local function addExperience(kind, n)
+    local was = readAttribute(kind)
+    local tried = {}
+
+    local did = false
+    if hasGlobal('PlayerDevelopmentSystem') and hasGlobal('gamedataProficiencyType') then
+        local ok, err = pcall(function()
+            local pl = Game.GetPlayer()
+            PlayerDevelopmentSystem.GetInstance(pl):GetDevelopmentData(pl)
+                :AddExperience(n, gamedataProficiencyType[kind])
+        end)
+        tried[#tried + 1] = 'DevelopmentData:AddExperience ' .. (ok and 'ran' or ('raised ' .. tostring(err)))
+        did = did or ok
+    else
+        tried[#tried + 1] = 'DevelopmentData:AddExperience unavailable'
+    end
+
+    if not did and fnExists(Game, 'AddExp') then
+        local ok, err = pcall(function() Game.AddExp(kind, n) end)
+        tried[#tried + 1] = 'Game.AddExp ' .. (ok and 'ran' or ('raised ' .. tostring(err)))
+        did = did or ok
+    end
+
+    local now = readAttribute(kind)
+    local how = table.concat(tried, '; ')
+
+    if not did then return false, 'every route refused. ' .. how end
+    if was == nil or now == nil then
+        return true, ('the call ran but %s cannot be read back on this build, so it is NOT confirmed. %s')
+            :format(kind, how)
+    end
+    if now == was then
+        return false, ('%s did not move: still %d. %s'):format(kind, was, how)
+    end
+    return true, ('%s %d -> %d, up %d. %s'):format(kind, was, now, now - was, how)
+end
+
+function readAttribute(stat)
     for _, r in ipairs(ATTR_READERS) do
         local ok, v = pcall(r[2], stat)
         if ok and type(v) == 'number' and v > 0 then
@@ -674,7 +729,27 @@ local function same() if caps.SameLine then ImGui.SameLine() end end
 -- Glyphs are not all the same advance width, so a label placed with a plain
 -- SameLine starts at a different x on every row. An absolute offset puts them
 -- all in one column.
-local function sameAt(x) if caps.SameLine then pcall(function() ImGui.SameLine(x) end) end end
+--
+-- But an absolute offset was measured against a wide window, and ImGui does
+-- not push back: narrow the pane and a column at x=430 puts its content past
+-- the right edge, where there is no horizontal scrollbar to go and find it. So
+-- every column is clamped into the width that actually exists, leaving room
+-- for whatever is about to be drawn at it. Columns collapse on a narrow
+-- window instead of content disappearing off the side of it.
+local function sameAt(x, keep)
+    if not caps.SameLine then return end
+    pcall(function()
+        if caps.GetContentRegionAvail then
+            local avail = ImGui.GetContentRegionAvail()
+            if avail and avail > 0 then
+                local maxX = avail - (keep or 90)
+                if maxX < 30 then maxX = 30 end
+                if x > maxX then x = maxX end
+            end
+        end
+        ImGui.SameLine(x)
+    end)
+end
 
 -- ---------------------------------------------------------------------------
 -- Night City palette. ImGui's default is a grey system dialog, which looks
@@ -1467,18 +1542,21 @@ local function tabInventory()
     end
 
     section('experience')
-    textc(COL.dim, 'Game.AddExp is a function, not an item, so there is no record to pre-check.')
+    textc(COL.dim, 'These are function calls, not items, so there is no record to pre-check. The value is read before and after instead, and what you get told is the difference.')
     for i, e in ipairs(data.exp or {}) do
+        local cur = readAttribute(e.arg)
         ImGui.Text(e.label)
+        sameAt(150); textc(cur and COL.cyan or COL.dim,
+                           cur and tostring(cur) or 'cannot read this one')
+        sameAt(260, 150)
         local qty = amountBox('exp' .. i, e.default, e.step)
         same()
-        if ImGui.Button('Add##exp' .. i) then
-            local ok, err = pcall(function() Game.AddExp(e.arg, qty) end)
-            note(ok and ('OK  added %d %s'):format(qty, e.arg)
-                     or ('FAIL Game.AddExp: ' .. tostring(err)))
+        if ImGui.Button(('Add %d##exp%d'):format(qty, i)) then
+            local ok, msg = addExperience(e.arg, qty)
+            note((ok and 'OK  ' or 'FAIL ') .. msg)
         end
-        sep()
     end
+    sep()
 
     section('ammo')
     for i, e in ipairs(data.ammo or {}) do
@@ -2294,8 +2372,11 @@ local function tabDiagnostics()
         for i, m in ipairs(state.missing) do
             statusIcon('bad')
             sameAt(30); ImGui.Text(m.label)
-            sameAt(300); textc(COL.dim, m.group)
-            sameAt(380); textc(COL.warn, m.record)
+            -- The record id is the longest thing on the row and the least
+            -- willing to shorten, so it gets its own line rather than a
+            -- column that runs off the edge on a narrow window.
+            sameAt(300, 60); textc(COL.dim, m.group)
+            ImGui.Indent(30); textc(COL.warn, m.record); ImGui.Unindent(30)
             if ImGui.Button('Find it on this build##find' .. i) then
                 local hits, how = findLike(m.record)
                 state.found[m.record] = hits
@@ -2653,11 +2734,24 @@ registerForEvent('onDraw', function()
 
         local okBody = caps.BeginChild and
             pcall(function() ImGui.BeginChild('fx_body', 0, -30, false) end)
+
+        -- Wrap every piece of text in the pane at the content edge, once, here
+        -- -- rather than hoping each of a few hundred call sites remembered to
+        -- use TextWrapped. A plain Text does not wrap, it just keeps going
+        -- past the right edge, and since nothing in this window scrolls
+        -- sideways the end of the sentence was simply gone. PushTextWrapPos(0)
+        -- means "wrap at the content region edge" and covers Text and
+        -- TextColored alike.
+        local wrapped_ = caps.PushTextWrapPos
+            and pcall(function() ImGui.PushTextWrapPos(0) end)
+
         local fn = TAB_FN[state.tab]
         if fn then
             local ok, err = pcall(fn)
             if not ok then textc(COL.bad, 'category error: ' .. tostring(err)) end
         end
+
+        if wrapped_ then pcall(function() ImGui.PopTextWrapPos() end) end
         if okBody then ImGui.EndChild() end
 
         sep()
