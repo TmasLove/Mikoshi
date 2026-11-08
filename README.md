@@ -85,6 +85,14 @@ behaviour in a tool whose job is to tell you whether a fix worked.
 
 ## What is deliberately not here
 
+- **Setting an attribute directly.** It moved the number and nothing else:
+  the attribute read 20 afterwards and every perk that attribute gates stayed
+  locked, because the number is a stat and the unlocking is done by the
+  development system, which the call never tells. A command that looks like it
+  worked and did not is the one thing this menu exists to avoid. Attribute
+  points remain, because they go through the development system and unlock what
+  they are supposed to. The readout stays.
+
 - **Force-completing a quest.** It wrote a journal state with no previous value
   to restore, and on 2.5 the enum names did not resolve, so it fell back to
   hard-coded numbers. A wrong number there is a permanently wrong quest.

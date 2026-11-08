@@ -440,22 +440,9 @@ local ACTIONS = {
         end,
         needs = 'Game.GetTeleportationFacility',
     },
-    -- Game.SetAttribute was renamed at 2.0. Only "Strength" is documented
-    -- verbatim; the other four names are inferred and marked as such.
-    setAttribute = {
-        probe = function()
-            return hasGlobal('PlayerDevelopmentSystem') and fnExists(Game, 'GetPlayer')
-        end,
-        run = function(attr, n)
-            local ok, res = pcall(function()
-                local pl = Game.GetPlayer()
-                return PlayerDevelopmentSystem.GetInstance(pl):GetDevelopmentData(pl)
-                    :SetAttribute(attr, n)
-            end)
-            return ok, res
-        end,
-        needs = 'PlayerDevelopmentSystem:SetAttribute',
-    },
+    -- setAttribute was removed with the buttons that called it. It moved the
+    -- number without unlocking what the number gates, which is the one kind of
+    -- success this menu will not report.
     -- Documented as Game.SetLevel("Level", 60, 1): three arguments, not two.
     -- Street cred through this call is NOT documented anywhere I could verify,
     -- so it is gone rather than left in looking official.
@@ -694,6 +681,48 @@ end
 -- at and nothing else, so the worst case is the marker going to the wrong
 -- place, and the fix is to track something in the journal yourself.
 -- ---------------------------------------------------------------------------
+-- Move journal focus off a quest, and PROVE it moved.
+--
+-- The guard used to do "local put = pcall(TrackEntry)" and count a hit when
+-- that returned true. pcall returning true only means the call did not raise.
+-- That is the same mistake this file has already paid for twice -- once on
+-- vehicles that never spawned, once on weather that never changed -- and it is
+-- why the guard reported success while the quest stayed exactly where it was.
+--
+-- So: try a route, then read the tracked quest back and compare. Nothing
+-- counts as working unless the blocked quest is no longer the tracked one.
+local function takeFocusFrom(blockedKey)
+    if not api.journalOk then return false, 'journal API unavailable' end
+
+    local routes = {}
+    if state.guard.lastGood ~= nil then
+        routes[#routes + 1] = { 'TrackEntry(the previous quest)',
+            function() api.journal:TrackEntry(state.guard.lastGood) end }
+    end
+    -- With nothing to go back to, untracking is still better than leaving
+    -- focus where it is not wanted.
+    routes[#routes + 1] = { 'TrackEntry(nil)',
+        function() api.journal:TrackEntry(nil) end }
+    routes[#routes + 1] = { 'UntrackEntry()',
+        function() api.journal:UntrackEntry() end }
+
+    local tried = {}
+    for _, r in ipairs(routes) do
+        local ran, err = pcall(r[2])
+        if ran then
+            local now = resolveTrackedQuest()
+            local nowKey = now and entryKey(now) or nil
+            if nowKey ~= blockedKey then
+                return true, r[1] .. ' moved focus'
+            end
+            tried[#tried + 1] = r[1] .. ' ran, focus did not move'
+        else
+            tried[#tried + 1] = r[1] .. ' raised ' .. tostring(err)
+        end
+    end
+    return false, table.concat(tried, '; ')
+end
+
 local function guardTick(dt)
     local g = state.guard
     if not g.on or #g.list == 0 then return end
@@ -720,26 +749,25 @@ local function guardTick(dt)
         -- goes back to. Captured here rather than asked for, so the guard
         -- needs no setup beyond naming the quest to block.
         g.lastGood = tracked
+        g.last = 'watching. ' .. (entryLabel(node) or 'tracked quest') .. ' is not blocked'
         return
     end
 
-    if g.lastGood == nil then
-        g.err = 'blocked quest is tracked, but nothing else has been tracked yet this session'
-        return
-    end
-
-    local put = pcall(function() api.journal:TrackEntry(g.lastGood) end)
-    if put then
+    local moved, how = takeFocusFrom(entryKey(node))
+    if moved then
         g.hits = g.hits + 1
+        g.fails = 0
         g.err = nil
+        g.last = how
     else
-        -- A handle kept across frames can go stale. Rather than retry four
-        -- times a second forever, stop and say so.
+        -- Retrying a route that demonstrably does nothing, four times a
+        -- second, forever, is worse than stopping and saying why.
         g.fails = g.fails + 1
+        g.err = how
+        g.last = how
         if g.fails >= 5 then
             g.on = false
-            g.err = 'TrackEntry failed five times, so the guard switched itself off'
-            note('guard off: %s', g.err)
+            note('guard off after 5 failed attempts: %s', how)
         end
     end
 end
@@ -1513,7 +1541,17 @@ local function tabQuestFixes()
                 else
                     g.list[#g.list + 1] = { key = key, label = entryLabel(q) or key }
                     saveBlocked()
-                    note('OK  blocked %s', g.list[#g.list].label)
+                    -- Act now, on the quest in front of you. Adding a row to a
+                    -- list and calling that success is how this button could
+                    -- report OK while the quest it named stayed tracked.
+                    local moved, how = takeFocusFrom(key)
+                    if moved then
+                        note('OK  blocked %s and took focus off it: %s',
+                             g.list[#g.list].label, how)
+                    else
+                        note('PARTIAL blocked %s, but focus is still on it: %s',
+                             g.list[#g.list].label, how)
+                    end
                 end
             end
             hint('Track the quest in your journal first, then press this. Mikoshi reads whatever your build calls it rather than guessing an id.')
@@ -1531,7 +1569,24 @@ local function tabQuestFixes()
                 end
                 textc(COL.dim, string.format('%s key read via %s. Handed focus back %d time(s) this session.',
                     ic('Key'), g.keySrc or 'not read yet', g.hits))
+                -- The guard runs off screen, so its state has to be legible here
+                -- or there is no way to tell "watching" from "quietly broken".
+                textc(api.trackOk and COL.ok or COL.bad,
+                'TrackEntry: ' .. (api.trackOk and 'present' or 'NOT on this build, so focus cannot be moved'))
+                textc(g.lastGood and COL.ok or COL.warn, 'somewhere to put focus back: '
+                .. (g.lastGood and 'yes' or 'not yet. Track any other quest once and it will have one.'))
+                if g.last then textc(COL.dim, 'last pass: ' .. tostring(g.last)) end
                 if g.err then textc(COL.warn, g.err) end
+                if ImGui.Button('Dump the journal manager to the log##jdump') then
+                local ok, out = pcall(function() return Dump(api.journal, false) end)
+                if ok then
+                    print('[Mikoshi] journal manager dump follows'); print(tostring(out))
+                    note('OK  dumped the journal manager. The console has its real method names.')
+                else
+                    note('FAIL Dump refused: ' .. tostring(out))
+                end
+            end
+                hint('If focus will not move, this lists what the journal manager on your build actually exposes, so the right call can be used instead of a guess.')
                 if not g.on then
                     textc(COL.warn, 'The guard is off, so these are only remembered, not enforced.')
                 end
@@ -1903,37 +1958,45 @@ local function tabWorld()
         sep()
     end
 
+    -- REMOVED: setting an attribute directly.
+    --
+    -- SetAttribute moves the number and nothing else. Tested in game on
+    -- 2026-11-08: the attribute reads 20 afterwards and the perks that
+    -- attribute gates stay locked, because the number is a stat value and the
+    -- unlocking is done by the development system, which was never told.
+    --
+    -- That is the worst shape a command can have. It is not a call that fails
+    -- -- a failure is honest and this file reports failures. It is a call that
+    -- succeeds, shows you a changed number, and leaves the character
+    -- inconsistent with itself: the sheet says 20, the perk tree says 3. The
+    -- whole argument of this mod is that a thing which looks like it worked
+    -- and did not is worse than a thing that plainly refused, and this was it.
+    --
+    -- Attribute points are the working route. They go through the development
+    -- system, so spending one unlocks what it is supposed to unlock, and they
+    -- already have a button two sections down.
+    --
+    -- The readout stays. Knowing what the character actually has is useful and
+    -- cannot put the save out of step with itself.
     if section('attributes', 'ArmFlex') then
-        if ACTIONS.setAttribute.probe() then
-            textc(COL.dim, 'Current value on the left. The box is what a button will set it TO.')
-            local n = amountBox('attrv', 15, 1)
-            same(); textc(COL.dim, 'set to this')
-            local anyRead = false
-            for i, a in ipairs(data.attributes or {}) do
-                local cur = readAttribute(a.arg)
-                if cur then anyRead = true end
-                statusIcon(cur and 'ok' or 'warn')
-                sameAt(30);  ImGui.Text(a.label)
-                sameAt(190); textc(cur and COL.cyan or COL.dim,
-                                   cur and tostring(cur) or 'could not read')
-                sameAt(250)
-                -- The button says the number, so there is no way to press it
-                -- thinking it does something else.
-                if ImGui.Button(('Set to %d##at%d'):format(n, i)) then
-                    local ok, res = ACTIONS.setAttribute.run(a.arg, n)
-                    note(verdict(('%s %s -> %d'):format(a.label, tostring(cur or '?'), n), ok, res,
-                        a.verified and '' or 'This attribute name is inferred, not documented.'))
-                end
-            end
-            if anyRead then
-                textc(COL.dim, ic('Eye') .. 'read via ' .. (state.attrSrc or 'unknown'))
-            else
-                textc(COL.warn, 'None of the three read routes answered on this build, so the values above are unknown rather than zero.')
-            end
-            textc(COL.dim, 'Only Body (Strength) has a documented internal name. The other four are inferred.')
-        else
-            textc(COL.bad, ACTIONS.setAttribute.needs .. ' is not available on this build')
+        local anyRead = false
+        for i, a in ipairs(data.attributes or {}) do
+            local cur = readAttribute(a.arg)
+            if cur then anyRead = true end
+            statusIcon(cur and 'ok' or 'warn')
+            sameAt(30);  ImGui.Text(a.label)
+            sameAt(190); textc(cur and COL.cyan or COL.dim,
+                               cur and tostring(cur) or 'could not read')
         end
+        if anyRead then
+            textc(COL.dim, ic('Eye') .. 'read via ' .. (state.attrSrc or 'unknown'))
+        else
+            textc(COL.warn, 'None of the three read routes answered on this build, so the values above are unknown rather than zero.')
+        end
+        sep()
+        textc(COL.warn, ic('AlertCircle') .. 'Setting these directly was removed on 2026-11-08.')
+        wrapped('It moved the number and nothing else: the attribute read 20 afterwards and every perk that attribute gates stayed locked. The number is a stat; the unlocking is done by the development system, which the call never tells. A command that looks like it worked and did not is the one thing this menu exists to avoid, so it is gone rather than left in with a warning under it.')
+        wrapped('Use Perk and attribute points below instead. Those go through the development system, so spending one unlocks what it is meant to unlock.')
         sep()
     end
     if section('character level') then
