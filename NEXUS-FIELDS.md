@@ -27,7 +27,7 @@ From that one quest it grew into the commands people actually ask for: eddies an
 3. Open the CET overlay and press **Reload All Mods**, or restart the game.
 4. The Mikoshi window appears whenever the overlay is open.
 
-To bind a key: open the overlay, go to **Bindings**, find "Mikoshi: pin status card", click the empty box, press your key, then Save. CET does not allow mods to ship a default key, so it starts unbound.
+To bind a key: open the overlay, go to **Bindings**, find "Mikoshi: pin the watch card", click the empty box, press your key, then Save. CET does not allow mods to ship a default key, so it starts unbound.
 
 **To uninstall:** delete the `fixer` folder. It writes nothing outside its own directory apart from a one-line `theme.txt` beside itself holding your chosen colour palette.
 

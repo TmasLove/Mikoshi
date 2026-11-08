@@ -63,15 +63,20 @@ until you set one.
 
   1. Open the CET overlay
   2. Go to the Bindings tab
-  3. Find "Mikoshi: pin status card"
+  3. Find "Mikoshi: pin the watch card"
   4. Click the empty box next to it
   5. Press the key you want
   6. Press Save
 
 WHAT YOUR KEY ACTUALLY DOES
 ---------------------------
-It pins a small status card on screen with the overlay closed. That card is
-read-only on purpose.
+It pins a live watch card on screen with the overlay closed. The card shows
+the hash of the quest you are tracking, your coordinates, and the current
+value of any quest facts you added to the watch list in Diagnostics. A value
+that changes is highlighted for six seconds.
+
+That is the point of it: pin the facts a quest should be setting, go do the
+thing the quest wants, and watch which one never moves. The card is read-only.
 
 To USE the menu you open the CET overlay, the key you chose when CET first
 ran, usually F1. The full menu appears there.

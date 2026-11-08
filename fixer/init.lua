@@ -51,6 +51,7 @@ local state = {
     theme       = 1,
     psy         = nil,
     psyShow     = false,
+    watch       = { list = {}, prev = {}, changedAt = {}, input = "" },
     tp          = { cur = nil, text = '', name = '', saved = {} },
     weather     = nil,  -- filled on first use of the World tab
     weatherType = nil,
@@ -807,6 +808,76 @@ end
 -- tabs
 -- ===========================================================================
 
+-- ---------------------------------------------------------------------------
+-- The watch list, which is what the pinned card is for.
+--
+-- Diagnosing a stuck quest comes down to one question: which fact is not
+-- flipping? That cannot be answered from a menu, because the moment that
+-- matters is while you are playing, doing the thing the quest wants. So pin
+-- the facts you care about, play, and watch them live on the card. A value
+-- that changes is highlighted for a few seconds so you catch it mid-fight.
+-- ---------------------------------------------------------------------------
+local function saveWatch()
+    pcall(function()
+        local f = io.open('watch.txt', 'w')
+        if not f then return end
+        for _, n in ipairs(state.watch.list) do f:write(n .. '\n') end
+        f:close()
+    end)
+end
+
+local function loadWatch()
+    pcall(function()
+        local f = io.open('watch.txt', 'r')
+        if not f then return end
+        for line in f:lines() do
+            local n = line:match('^%s*(.-)%s*$')
+            if n and #n > 0 and #state.watch.list < 12 then
+                state.watch.list[#state.watch.list + 1] = n
+            end
+        end
+        f:close()
+    end)
+end
+
+local function addWatch(name)
+    if not name or name == '' then return false, 'nothing to add' end
+    if #state.watch.list >= 12 then return false, 'the card holds twelve at most' end
+    for _, n in ipairs(state.watch.list) do
+        if n == name then return false, name .. ' is already watched' end
+    end
+    state.watch.list[#state.watch.list + 1] = name
+    saveWatch()
+    return true, 'watching ' .. name
+end
+
+local function removeWatch(i)
+    table.remove(state.watch.list, i)
+    saveWatch()
+end
+
+-- Read every watched fact, remembering when each last changed.
+local function readWatch()
+    local now = 0
+    pcall(function() now = os.clock() end)
+    local out = {}
+    for i, name in ipairs(state.watch.list) do
+        local v
+        if api.getFact then
+            local ok, got = pcall(function() return api.getFact(name) end)
+            if ok then v = got end
+        end
+        local prev = state.watch.prev[name]
+        if prev ~= nil and v ~= nil and prev ~= v then
+            state.watch.changedAt[name] = now
+        end
+        state.watch.prev[name] = v
+        local at = state.watch.changedAt[name]
+        out[i] = { name = name, value = v, fresh = (at ~= nil and (now - at) < 6) }
+    end
+    return out
+end
+
 local function tabQuestFixes()
     textc(COL.dim, 'Track the broken quest in your journal, then use the tools below.')
     sep()
@@ -1483,6 +1554,36 @@ local function tabBrowse()
 end
 
 local function tabDiagnostics()
+    section('watch list', 'Pulse')
+    wrapped('These appear on the pinned card, live, while you play. Pin the facts a quest should be setting, go do the thing, and watch which one never moves.')
+    if caps.InputText then
+        local v = ImGui.InputText('fact name##watchin', state.watch.input, 96)
+        if type(v) == 'string' then state.watch.input = v end
+        same()
+        if ImGui.Button('Watch it##watchadd') then
+            local ok, msg = addWatch(state.watch.input)
+            if ok then state.watch.input = '' end
+            note((ok and 'OK  ' or 'FAIL ') .. msg)
+        end
+    else
+        textc(COL.bad, 'InputText unavailable, so facts cannot be added on this build')
+    end
+
+    if #state.watch.list == 0 then
+        textc(COL.dim, 'Nothing watched. Try one of the quest fact names above.')
+    else
+        for i = #state.watch.list, 1, -1 do
+            local name = state.watch.list[i]
+            local v = state.watch.prev[name]
+            ImGui.Text(name)
+            sameAt(280); textc(COL.cyan, v == nil and '--' or tostring(v))
+            same()
+            if ImGui.Button('Drop##watchdrop' .. i) then removeWatch(i) end
+        end
+        textc(COL.dim, 'Saved beside the mod, so the list survives a reload.')
+    end
+    sep()
+
     section('appearance', 'Palette')
     textc(COL.dim, 'Palette. Everything in the window is derived from these two colours.')
     for i = 1, #THEMES do
@@ -1531,7 +1632,7 @@ local function tabDiagnostics()
     sep()
 
     section('keybind')
-    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin status card", click the empty box, press the key you want, then Save.')
+    wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin the watch card", click the empty box, press the key you want, then Save.')
     textc(state.pinned and COL.ok or COL.dim,
         state.pinned and 'pinned: the menu stays on screen with the overlay shut'
                        or 'not pinned: the menu shows only while the overlay is open')
@@ -1648,6 +1749,7 @@ end
 registerForEvent('onInit', function()
     detectImGui()
     loadTheme()
+    loadWatch()
     resolveApi()
     verifyAll()
     mod.ready = true
@@ -1667,16 +1769,50 @@ registerForEvent('onDraw', function()
     -- a small read-only card instead, and says how to actually use it.
     if state.pinned and not state.overlayOpen then
         pushTheme()
-        ImGui.SetNextWindowSize(360, 112, ImGuiCond.FirstUseEver)
+        ImGui.SetNextWindowSize(420, 260, ImGuiCond.FirstUseEver)
         if ImGui.Begin('MIKOSHI') then
-            textc(COL.accent, ic('Wrench') .. 'MIKOSHI')
-            same(); textc(COL.dim, 'v' .. VERSION)
+            textc(COL.accent, ic('Pulse') .. 'MIKOSHI WATCH')
             sep()
-            textc(COL.warn, 'Open the CET overlay to use the menu.')
-            textc(COL.dim, 'Nothing here responds until it is open. That is a CET rule:')
-            textc(COL.dim, 'it only sends input to ImGui while the overlay is showing.')
+
+            -- The quest you are tracking, with the number the game knows it by.
+            -- When something breaks, this is the first thing you need.
+            local quest, qerr, depth = resolveTrackedQuest()
+            if quest then
+                local ok, hash = pcall(function() return api.journal:GetEntryHash(quest) end)
+                textc(COL.dim, 'tracked quest hash')
+                same(); textc(COL.cyan, ok and tostring(hash) or 'unavailable')
+            else
+                textc(COL.dim, qerr or 'nothing tracked')
+            end
+
+            -- Live position, so a waypoint worth saving can be read off here
+            -- and typed into the teleport box later.
+            local ok, p = pcall(function() return Game.GetPlayer():GetWorldPosition() end)
+            if ok and p then
+                local x, y, z
+                pcall(function() x, y, z = p.x, p.y, p.z end)
+                if x then
+                    textc(COL.dim, string.format('%.0f, %.0f, %.0f', x, y, z))
+                end
+            end
             sep()
-            textc(COL.dim, state.log[1] or 'ready')
+
+            local rows = readWatch()
+            if #rows == 0 then
+                textc(COL.dim, 'No facts watched yet.')
+                textc(COL.dim, 'Add them in Diagnostics, then play and watch them move.')
+            else
+                for _, r in ipairs(rows) do
+                    -- A value that just changed stays highlighted for six
+                    -- seconds, long enough to notice without stopping.
+                    textc(r.fresh and COL.accent or COL.dim, r.name)
+                    sameAt(250)
+                    textc(r.fresh and COL.ok or COL.dim,
+                        r.value == nil and '--' or tostring(r.value))
+                end
+            end
+            sep()
+            textc(COL.dim, 'Open the CET overlay to use the menu.')
         end
         ImGui.End()
         popTheme()
@@ -1727,13 +1863,13 @@ end)
 
 -- Root level, outside any event: CET requires it there. CET does not let a mod
 -- ship a default key, so this appears UNBOUND in the overlay's Bindings tab
--- until you assign one. Bindings > "Mikoshi: pin status card" > click > press a key >
+-- until you assign one. Bindings > "Mikoshi: pin the watch card" > click > press a key >
 -- Save.
 --
 -- Pinning draws the window with the overlay shut, which is the point of having
 -- a key at all. Clicking still needs the overlay, because CET only routes mouse
 -- and keyboard into ImGui while it is open. That is a CET rule, not a choice.
-registerHotkey('fixer_toggle', 'Mikoshi: pin status card', function()
+registerHotkey('fixer_toggle', 'Mikoshi: pin the watch card', function()
     state.pinned = not state.pinned
     if state.pinned then state.show = true end
 end)
