@@ -51,6 +51,7 @@ local state = {
     theme       = 1,
     psy         = nil,
     psyShow     = false,
+    showCoords  = false,
     watch       = { list = {}, prev = {}, changedAt = {}, input = "" },
     tp          = { cur = nil, text = '', name = '', saved = {} },
     weather     = nil,  -- filled on first use of the World tab
@@ -1582,6 +1583,7 @@ local function tabDiagnostics()
         end
         textc(COL.dim, 'Saved beside the mod, so the list survives a reload.')
     end
+    state.showCoords = ImGui.Checkbox('also show my coordinates on the card', state.showCoords)
     sep()
 
     section('appearance', 'Palette')
@@ -1769,50 +1771,32 @@ registerForEvent('onDraw', function()
     -- a small read-only card instead, and says how to actually use it.
     if state.pinned and not state.overlayOpen then
         pushTheme()
-        ImGui.SetNextWindowSize(420, 260, ImGuiCond.FirstUseEver)
-        if ImGui.Begin('MIKOSHI') then
-            textc(COL.accent, ic('Pulse') .. 'MIKOSHI WATCH')
-            sep()
-
-            -- The quest you are tracking, with the number the game knows it by.
-            -- When something breaks, this is the first thing you need.
-            local quest, qerr, depth = resolveTrackedQuest()
-            if quest then
-                local ok, hash = pcall(function() return api.journal:GetEntryHash(quest) end)
-                textc(COL.dim, 'tracked quest hash')
-                same(); textc(COL.cyan, ok and tostring(hash) or 'unavailable')
-            else
-                textc(COL.dim, qerr or 'nothing tracked')
-            end
-
-            -- Live position, so a waypoint worth saving can be read off here
-            -- and typed into the teleport box later.
-            local ok, p = pcall(function() return Game.GetPlayer():GetWorldPosition() end)
-            if ok and p then
-                local x, y, z
-                pcall(function() x, y, z = p.x, p.y, p.z end)
-                if x then
-                    textc(COL.dim, string.format('%.0f, %.0f, %.0f', x, y, z))
-                end
-            end
-            sep()
-
+        -- A DIFFERENT window id from the full menu. Sharing 'MIKOSHI' meant
+        -- ImGui restored the menu's saved geometry, which is why a card meant
+        -- to be a few lines opened at a quarter of the screen.
+        -- AlwaysAutoResize then shrinks it to exactly its contents.
+        if ImGui.Begin('MIKOSHI WATCH##card', ImGuiWindowFlags.AlwaysAutoResize) then
             local rows = readWatch()
             if #rows == 0 then
-                textc(COL.dim, 'No facts watched yet.')
-                textc(COL.dim, 'Add them in Diagnostics, then play and watch them move.')
+                textc(COL.dim, ic('Pulse') .. 'nothing watched')
             else
                 for _, r in ipairs(rows) do
-                    -- A value that just changed stays highlighted for six
-                    -- seconds, long enough to notice without stopping.
+                    -- Changed in the last six seconds reads in the accent
+                    -- colour, so a fact flipping is visible at a glance.
                     textc(r.fresh and COL.accent or COL.dim, r.name)
-                    sameAt(250)
-                    textc(r.fresh and COL.ok or COL.dim,
+                    sameAt(230)
+                    textc(r.fresh and COL.ok or COL.cyan,
                         r.value == nil and '--' or tostring(r.value))
                 end
             end
-            sep()
-            textc(COL.dim, 'Open the CET overlay to use the menu.')
+            if state.showCoords then
+                local ok, p = pcall(function() return Game.GetPlayer():GetWorldPosition() end)
+                if ok and p then
+                    local x, y, z
+                    pcall(function() x, y, z = p.x, p.y, p.z end)
+                    if x then textc(COL.dim, string.format('%.0f  %.0f  %.0f', x, y, z)) end
+                end
+            end
         end
         ImGui.End()
         popTheme()
