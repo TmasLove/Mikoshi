@@ -9,12 +9,13 @@ record the running game will admit to.
 Folder name is `fixer` and the display name is Mikoshi. The folder stays as it is
 so an existing hotkey binding survives a rename.
 
-![Quest Fixes and the cyberpsycho checklist](docs/screenshot-quest-fixes.png)
+![Quest Fixes: three fact repairs, each already applied on this save and so
+disabled rather than left inviting a pointless write](docs/screenshot-quest-fixes.png)
 
 ## Download
 
-[**Mikoshi-1.0.zip**](dist/Mikoshi-1.0.zip) — 27 KB, unzips straight into your
-Cyberpunk 2077 folder.
+[**Mikoshi-1.0.1.zip**](dist/Mikoshi-1.0.1.zip) — 56 KB, unzips straight into
+your Cyberpunk 2077 folder.
 
 Requires [Cyber Engine Tweaks](https://www.nexusmods.com/cyberpunk2077/mods/107)
 1.38.1 or later, on game 2.5.
@@ -72,16 +73,48 @@ behaviour in a tool whose job is to tell you whether a fix worked.
   tier and gig counters, and a checklist of all 17 cyberpsycho sightings with
   their districts and quest ids.
 - **Shards** — conversation shards that fail to spawn on a body.
+
+![Shards: the ones a build does not recognise carry a red mark and the word
+unavailable instead of a Give button](docs/screenshot-shards.png)
+
 - **Inventory** — eddies, points, ammo, consumables, crafting, iconics.
-- **World** — time, weather, teleport, level, attributes.
+
+![Inventory: eddies, perk and attribute points, street cred and level, ammo by
+type](docs/screenshot-inventory.png)
+
+- **World** — time of day, the rain values the weather system will admit to, a
+  nudge upward for falling through geometry, and teleport with saved waypoints.
+
+![World: time of day, the two weather state ids actually present on this
+install, the unstuck nudge, and teleport](docs/screenshot-world.png)
+
 - **Browse** — reads clothing, weapons and vehicles out of the running game
   (2074 / 1828 / 1379 records here), with search, readable names, quality
   colours and a filter for what V can actually obtain.
 - **Diagnostics** — what this build exposes, the palette picker, manual record
   and fact checks.
+
+![Diagnostics: the watch list, the palette picker, and a line for each facility
+this build either has or does not](docs/screenshot-diagnostics.png)
+
 - **Undo** — every fact write with its previous value.
 
+## Palettes
+
+A palette sets the whole window, not just the accent. Every surface, grey and
+status colour is derived from the three colours on the chip, so the picker is
+nine window designs rather than nine highlight colours.
+
 ![Nine palettes](docs/palettes.png)
+
+The screenshots above are Samurai. The same panel under Voodoo:
+
+![The Diagnostics panel again, this time in Voodoo: jungle green on near-black,
+with the status colours re-derived to match](docs/screenshot-palette-voodoo.png)
+
+> The in-game shots were taken on 1.0, so the header reads `v1.0` and
+> `24/32 ids verified`. The catalogue corrections that followed are what took it
+> to the 36/36 of 1.0.1; the panels themselves are unchanged.
 
 ## What is deliberately not here
 
