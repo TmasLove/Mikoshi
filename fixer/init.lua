@@ -2772,6 +2772,55 @@ local function tabDiagnostics()
         sep()
     end
 
+    -- ---------------------------------------------------------------------
+    -- Updates.
+    --
+    -- There is no "check for updates" button here because a CET mod cannot
+    -- reach the internet: the Lua VM has no network stack, no HTTP client, no
+    -- sockets, and io is confined to this folder. A mod cannot find out that
+    -- an update exists, never mind fetch one.
+    --
+    -- That is asserted nowhere. The row below PROBES for every facility that
+    -- could possibly do it and prints what it finds, so if some build does
+    -- expose one, it shows up here instead of being ruled out by something I
+    -- believed in 2026.
+    -- ---------------------------------------------------------------------
+    if section('updates', 'Download', true) then
+        textc(COL.accent, 'Mikoshi ' .. VERSION)
+        local probes = {
+            { 'http',      'an HTTP client' },
+            { 'https',     'an HTTPS client' },
+            { 'socket',    'LuaSocket' },
+            { 'curl',      'curl bindings' },
+            { 'Download',  'a CET download helper' },
+            { 'os.execute','running a program' },
+            { 'io.popen',  'reading a program' },
+        }
+        local found = {}
+        for _, p in ipairs(probes) do
+            local ok = false
+            if p[1] == 'os.execute' then
+                ok = (type(os) == 'table' and type(os.execute) == 'function')
+            elseif p[1] == 'io.popen' then
+                ok = (type(io) == 'table' and type(io.popen) == 'function')
+            else
+                ok = hasGlobal(p[1])
+            end
+            if ok then found[#found + 1] = p[2] end
+        end
+        if #found == 0 then
+            textc(COL.dim, 'This build exposes no way for a mod to reach the network, so updating has to happen outside the game.')
+        else
+            textc(COL.warn, 'This build does expose: ' .. table.concat(found, ', ')
+                  .. '. An in-game check may be possible after all.')
+        end
+        sep()
+        wrapped('To update: run "Check for Mikoshi updates" from the tools folder in the download. It asks GitHub for the newest version, backs up this folder, installs over it, and carries your palette, watch list, blocked quests and folds across.')
+        wrapped('If you installed through Vortex, let Vortex do it instead.')
+        textc(COL.dim, 'github.com/TmasLove/Mikoshi/releases')
+        sep()
+    end
+
     if section('keybind') then
         wrapped('CET does not allow a mod to ship a default key. Open the overlay, go to Bindings, find "Mikoshi: pin the watch card", click the empty box, press the key you want, then Save.')
         textc(state.pinned and COL.ok or COL.dim,
