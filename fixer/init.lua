@@ -24,7 +24,7 @@
 ]]
 
 local mod = { ready = false }
-local VERSION = '1.0'
+local VERSION = '1.0.1'
 
 -- The catalog lives in its own file so a typo there cannot stop the menu
 -- loading. If it fails we carry on with an empty catalog and say so.

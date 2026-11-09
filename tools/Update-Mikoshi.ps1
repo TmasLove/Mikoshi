@@ -25,7 +25,10 @@ param(
     # Check and report, change nothing.
     [switch] $CheckOnly,
     # Install even when the installed version already matches.
-    [switch] $Force
+    [switch] $Force,
+    # Skip the confirmation prompt. For scripted use and for testing this
+    # script itself, which cannot answer a prompt.
+    [switch] $Yes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -159,8 +162,12 @@ if ($CheckOnly) { Say ''; Say '  -CheckOnly, so nothing was changed.'; exit 0 }
 
 Say ''
 Warn '  Close Cyberpunk 2077 before continuing. Files in use cannot be replaced.'
-$ans = Read-Host '  Install it now? (y/N)'
-if ($ans -notmatch '^[Yy]') { Say '  Cancelled. Nothing was changed.'; exit 0 }
+if ($Yes) {
+    Say '  -Yes was given, so installing without asking.'
+} else {
+    $ans = Read-Host '  Install it now? (y/N)'
+    if ($ans -notmatch '^[Yy]') { Say '  Cancelled. Nothing was changed.'; exit 0 }
+}
 
 # ------------------------------------------------------------- download
 Step 'Downloading'
@@ -202,6 +209,15 @@ Copy-Item (Join-Path $src.FullName '*') $modPath -Recurse -Force
 foreach ($f in $saved.Keys) {
     Set-Content -Path (Join-Path $modPath $f) -Value $saved[$f] -NoNewline
     Say "  kept $f"
+}
+
+# The readme ships in the download but is not part of the repo fixer folder,
+# so a straight copy of that folder leaves it deleted. Put it back from the
+# archive, where it lives one level up.
+$readme = Get-ChildItem -Path $tmp -Recurse -File -Filter "READ THIS FIRST.txt" | Select-Object -First 1
+if ($readme) {
+    Copy-Item $readme.FullName (Join-Path $modPath $readme.Name) -Force
+    Say "  restored $($readme.Name)"
 }
 
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
